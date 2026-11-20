@@ -346,3 +346,53 @@ INSERT INTO plans (slug, name, price_try, price_usd, max_rooms, max_users, featu
   ('enterprise', 'Enterprise', 0,       0,    -1, -1,  '["Pro özellikleri","HBYS/E-Nabız entegrasyonu","Özel eğitim","SLA garantisi","Sınırsız salon ve kullanıcı"]')
 ON CONFLICT (slug) DO NOTHING;
 
+CREATE TYPE device_power_state AS ENUM ('OFF', 'STANDBY', 'ON', 'ARMED');
+CREATE TYPE device_mode        AS ENUM ('SIM', 'REAL');
+
+CREATE TABLE IF NOT EXISTS modules (
+  id          UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  slug        VARCHAR(40) UNIQUE NOT NULL,
+  name        VARCHAR(100) NOT NULL,
+  description TEXT,
+  price_try   INTEGER     NOT NULL DEFAULT 0,
+  price_usd   INTEGER     NOT NULL DEFAULT 0,
+  is_active   BOOLEAN     NOT NULL DEFAULT TRUE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS institution_modules (
+  id                     UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  institution_id         UUID        NOT NULL REFERENCES institutions(id),
+  module_slug            VARCHAR(40) NOT NULL REFERENCES modules(slug),
+  status                 VARCHAR(20) NOT NULL DEFAULT 'active',
+  purchased_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  cancelled_at           TIMESTAMPTZ,
+  iyzico_subscription_id VARCHAR(100),
+  stripe_subscription_id VARCHAR(100),
+  UNIQUE (institution_id, module_slug)
+);
+
+CREATE TABLE IF NOT EXISTS controllable_devices (
+  id                        UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  institution_id            UUID        NOT NULL REFERENCES institutions(id),
+  room_id                   UUID        REFERENCES operating_rooms(id),
+  name                      VARCHAR(100) NOT NULL,
+  device_group              VARCHAR(30) NOT NULL,
+  device_type               VARCHAR(50) NOT NULL,
+  driver_key                VARCHAR(50) NOT NULL DEFAULT 'mock',
+  mode                      device_mode NOT NULL DEFAULT 'SIM',
+  power_state               device_power_state NOT NULL DEFAULT 'OFF',
+  power_level               SMALLINT    NOT NULL DEFAULT 0,
+  requires_physical_confirm BOOLEAN     NOT NULL DEFAULT FALSE,
+  capabilities              JSONB       NOT NULL DEFAULT '{}',
+  connection_info           JSONB       NOT NULL DEFAULT '{}',
+  serial_number             VARCHAR(60),
+  category                  VARCHAR(60),
+  last_maintenance_at       DATE,
+  calibration_at            DATE,
+  is_voice_enabled          BOOLEAN     NOT NULL DEFAULT TRUE,
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_controllable_devices_room ON controllable_devices(room_id);
