@@ -1,0 +1,84 @@
+{
+  "title":         "Sterilization",
+  "sets":          "Surgical Sets",
+  "setTracking":   "Set Tracking Panel",
+  "warehouse":     "Sterile Storage",
+  "instruments":   "Single Instruments",
+  "addSet":        "+ Add Set",
+  "newSet":        "Add New Surgical Set",
+  "setName":       "Set Name",
+  "setNamePlaceholder": "e.g. Laparoscopy Set A",
+  "setCode":       "Set Code",
+  "quantity":      "Quantity",
+  "shelf":         "Shelf Location",
+  "shelfPlaceholder": "e.g. A-1",
+  "initialStatus": "Initial Status",
+  "lastSterilized":"Last Sterilized",
+  "sterileCount":  "Sterile",
+  "inUseCount":    "In Use",
+  "setAdded":      "Surgical set added ✓",
+  "statusUpdated": "Status updated: {{status}}",
+  "clickToChange": "Click: change status",
+  "noSets":        "No sets found",
+
+  "stages": {
+    "received":      "Received",
+    "washing":       "Washing",
+    "sterilization": "Sterilization",
+    "sterile":       "Sterile Ready",
+    "storage":       "Stored"
+  },
+
+  "stageKeys": {
+    "teslim_alindi": "Received",
+    "yikama":        "Washing",
+    "sterilizasyon": "Sterilization",
+    "steril":        "Sterile Ready",
+    "depo":          "Stored"
+  },
+
+  "summary": {
+    "sterile":      "Sterile Ready",
+    "inUse":        "In Use",
+    "sterilizing":  "Sterilizing",
+    "faulty":       "Faulty"
+  },
+
+  "tracking": {
+    "title":        "This Session's Operations",
+    "noLog":        "No operations yet — start by scanning a QR code",
+    "operations":   "{{count}} operations"
+  },
+
+  "qr": {
+    "scanTitle":    "Scan Set QR Code",
+    "hint":         "Hold the QR code on the set label in front of the camera",
+    "manual":       "⌨️ Enter QR Code Manually",
+    "backToCamera": "← Back to Camera",
+    "scanning":     "Scanning",
+    "requesting":   "Requesting camera permission…",
+    "denied":       "Camera permission denied. Please enable in browser settings.",
+    "notFound":     "Camera not found.",
+    "torch":        "Flashlight",
+    "format":       "Format: {{prefix}}[CODE]",
+    "setNotFound":  "Set not found: {{code}}",
+    "setFound":     "Set recognized: {{name}}",
+    "confirm":      "This operation will be recorded in the audit log",
+    "apply":        "Confirm ✓",
+    "nextStage":    "Move to {{stage}}"
+  },
+
+  "label": {
+    "title":        "QR Label Generator",
+    "subtitle":     "Generate and print barcode labels for surgical sets",
+    "selectAll":    "Select All",
+    "clearAll":     "Clear Selection",
+    "print":        "🖨️ Print ({{count}})",
+    "sizeSmall":    "Small (80px)",
+    "sizeMedium":   "Medium (120px)",
+    "sizeLarge":    "Large (160px)",
+    "shelf":        "Shelf: {{location}}",
+    "selectFirst":  "Select at least one set",
+    "preview":      "Preview"
+  }
+}

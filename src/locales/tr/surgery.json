@@ -1,0 +1,60 @@
+{
+  "title":           "Ameliyat",
+  "plural":          "Ameliyatlar",
+  "program":         "Günlük Ameliyat Programı",
+  "add":             "+ Ameliyat Ekle",
+  "new":             "Yeni Ameliyat Ekle",
+  "detail":          "Ameliyat Detayı",
+  "name":            "Ameliyat Adı",
+  "namePlaceholder": "Ör: Laparoskopik Kolesistektomi",
+  "branch":          "Branş",
+  "surgeon":         "Cerrah",
+  "surgeonPlaceholder":"Dr. ...",
+  "room":            "Salon",
+  "startTime":       "Başlangıç Saati",
+  "endTime":         "Bitiş Saati",
+  "duration":        "Süre",
+  "durationUnit":    "dakika",
+  "patient":         "Hasta",
+  "patientPlaceholder":"Ad Soyad (Yaş E/K)",
+  "notes":           "Notlar",
+  "team":            "Ekip",
+  "sets":            "Kullanılan Setler",
+  "changeStatus":    "Durum Değiştir",
+  "statusChanged":   "Durum güncellendi ✓",
+  "added":           "Ameliyat eklendi ✓",
+  "deleted":         "Ameliyat kaldırıldı",
+  "notFound":        "Ameliyat bulunamadı",
+  "noSurgeries":     "Bu listede ameliyat yok",
+
+  "teamRoles": {
+    "surgeon":   "Cerrah",
+    "scrub":     "Scrub Hemşiresi",
+    "anesthesia":"Anestezi",
+    "circulate": "Sirkülasyon"
+  },
+
+  "branches": {
+    "generalSurgery": "Genel Cerrahi",
+    "orthopedics":    "Ortopedi",
+    "ophthalmology":  "Göz Hastalıkları",
+    "ent":            "KBB",
+    "neurosurgery":   "Nöroşirürji",
+    "urology":        "Üroloji",
+    "cardiology":     "Kardiyoloji",
+    "cardiovascular": "Kardiyovasküler Cerrahi",
+    "plastic":        "Plastik Cerrahi",
+    "gynecology":     "Kadın Hastalıkları",
+    "pediatrics":     "Pediatrik Cerrahi"
+  },
+
+  "stats": {
+    "today":          "Bugünkü Ameliyat",
+    "thisWeek":       "Bu Hafta",
+    "avgDuration":    "Ort. Ameliyat Süresi",
+    "occupancy":      "Doluluk Oranı",
+    "active":         "Aktif",
+    "waiting":        "Bekliyor",
+    "completed":      "Tamamlandı"
+  }
+}

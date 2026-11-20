@@ -1,0 +1,84 @@
+{
+  "title":         "Sterilizasyon",
+  "sets":          "Cerrahi Setler",
+  "setTracking":   "Set Takip Paneli",
+  "warehouse":     "Steril Depo",
+  "instruments":   "Tekli Aletler",
+  "addSet":        "+ Set Ekle",
+  "newSet":        "Yeni Cerrahi Set Ekle",
+  "setName":       "Set Adı",
+  "setNamePlaceholder": "Ör: Laparoskopi Seti A",
+  "setCode":       "Set Kodu",
+  "quantity":      "Adet",
+  "shelf":         "Raf Konumu",
+  "shelfPlaceholder": "Ör: A-1",
+  "initialStatus": "Başlangıç Durumu",
+  "lastSterilized":"Son Sterilizasyon",
+  "sterileCount":  "Steril",
+  "inUseCount":    "Kullanımda",
+  "setAdded":      "Cerrahi set eklendi ✓",
+  "statusUpdated": "Durum güncellendi: {{status}}",
+  "clickToChange": "Tıkla: durum değiştir",
+  "noSets":        "Set bulunamadı",
+
+  "stages": {
+    "received":      "Teslim Alındı",
+    "washing":       "Yıkama",
+    "sterilization": "Sterilizasyon",
+    "sterile":       "Steril Hazır",
+    "storage":       "Depoya Kaldırıldı"
+  },
+
+  "stageKeys": {
+    "teslim_alindi": "Teslim Alındı",
+    "yikama":        "Yıkama",
+    "sterilizasyon": "Sterilizasyon",
+    "steril":        "Steril Hazır",
+    "depo":          "Depoya Kaldırıldı"
+  },
+
+  "summary": {
+    "sterile":      "Steril Hazır",
+    "inUse":        "Kullanımda",
+    "sterilizing":  "Sterilizasyonda",
+    "faulty":       "Arızalı"
+  },
+
+  "tracking": {
+    "title":        "Bu Oturumun İşlemleri",
+    "noLog":        "Henüz işlem yok — QR tarayarak başlayın",
+    "operations":   "{{count}} işlem"
+  },
+
+  "qr": {
+    "scanTitle":    "Set QR Kodunu Tara",
+    "hint":         "Set etiketindeki QR kodu kameranın önüne tutun",
+    "manual":       "⌨️ Manuel QR Kodu Gir",
+    "backToCamera": "← Kameraya Dön",
+    "scanning":     "Taranıyor",
+    "requesting":   "Kamera izni bekleniyor…",
+    "denied":       "Kamera izni reddedildi. Tarayıcı ayarlarından izin verin.",
+    "notFound":     "Kamera bulunamadı.",
+    "torch":        "El feneri",
+    "format":       "Format: {{prefix}}[KOD]",
+    "setNotFound":  "Set bulunamadı: {{code}}",
+    "setFound":     "Set tanındı: {{name}}",
+    "confirm":      "Bu işlem audit log'a kaydedilecek",
+    "apply":        "Onayla ✓",
+    "nextStage":    "{{stage}}'a Geç"
+  },
+
+  "label": {
+    "title":        "QR Etiket Üretici",
+    "subtitle":     "Cerrahi setler için barkod etiketleri oluştur ve yazdır",
+    "selectAll":    "Tümünü Seç",
+    "clearAll":     "Seçimi Kaldır",
+    "print":        "🖨️ Yazdır ({{count}})",
+    "sizeSmall":    "Küçük (80px)",
+    "sizeMedium":   "Orta (120px)",
+    "sizeLarge":    "Büyük (160px)",
+    "shelf":        "Raf: {{location}}",
+    "selectFirst":  "En az bir set seçin",
+    "preview":      "Önizleme"
+  }
+}

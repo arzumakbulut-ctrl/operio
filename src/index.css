@@ -1,0 +1,310 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.cdnfonts.com/css/geist-sans');
+
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --font:'Geist Sans','Geist',system-ui,-apple-system,sans-serif;
+  --font-display:'Outfit','Geist Sans',system-ui,sans-serif;
+  --teal:#0F766E;--teal-light:#CCFBF1;--teal-mid:#14B8A6;--teal-dark:#134E4A;
+  --slate:#0F172A;--slate-mid:#334155;--slate-light:#94A3B8;--slate-xlight:#F1F5F9;
+  --white:#FFFFFF;--surface:#e2f6f4;--border:#82c3bf;--border-strong:#5aa8a3;
+  --success:#059669;--warning:#D97706;--danger:#DC2626;--info:#0369A1;
+  --radius:10px;--radius-lg:16px;--radius-xl:24px;
+  --sidebar-bg:#0F172A;
+  --topbar-bg:#f5fefe;
+  --card-bg:#f5fefe;
+  --input-bg:#e2f6f4;
+  --shadow-color:rgba(0,0,0,0.09);
+}
+html.dark{
+  --slate:#F1F5F9;--slate-mid:#CBD5E1;--slate-light:#64748B;--slate-xlight:#1E293B;
+  --white:#1E293B;--surface:#0F172A;--border:#334155;--border-strong:#475569;
+  --teal-light:rgba(20,184,166,0.15);
+  --sidebar-bg:#020617;
+  --topbar-bg:#1E293B;
+  --card-bg:#1E293B;
+  --input-bg:#0F172A;
+  --shadow-color:rgba(0,0,0,0.3);
+}
+html,body{height:100%;overflow:hidden}
+body{
+  font-family:'Geist Sans','Geist',system-ui,-apple-system,sans-serif;
+  background:var(--surface);color:var(--slate);
+  font-size:14px;line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  letter-spacing:-0.01em;
+}
+*{transition:background-color 0.25s,border-color 0.25s,color 0.2s;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+*::-webkit-scrollbar{width:4px;height:4px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:var(--border);border-radius:20px}
+h1,h2,h3{font-family:'Outfit',system-ui,sans-serif;letter-spacing:-0.03em}
+
+/* ── BUTTONS ─────────────────────── */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 15px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:none;background:transparent;font-family:var(--font);letter-spacing:-0.01em;transition:all 0.15s}
+.btn-primary{background:var(--teal);color:white}
+.btn-primary:hover{background:var(--teal-dark);transform:translateY(-1px)}
+.btn-secondary{background:var(--surface);color:var(--slate-mid);border:1px solid var(--border)}
+.btn-secondary:hover{background:var(--border)}
+.btn-sm{padding:5px 11px;font-size:11px}
+.btn-danger{background:#FEF2F2;color:#DC2626;border:1px solid #FECACA}
+.btn-danger:hover{background:#FEE2E2}
+
+/* ── FORM ─────────────────────── */
+.fg{display:flex;flex-direction:column;gap:5px;flex:1}
+.fl{font-size:10.5px;font-weight:700;color:var(--slate-light);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px}
+.fi{padding:10px 13px;border:1.5px solid var(--border);border-radius:10px;font-size:13px;font-family:var(--font);background:var(--input-bg);color:var(--slate);outline:none;transition:border-color 0.15s,box-shadow 0.15s;width:100%}
+.fi:focus{border-color:var(--teal-mid);box-shadow:0 0 0 3px rgba(20,184,166,0.12);background:var(--white)}
+.fr{display:flex;gap:12px}
+textarea.fi{resize:vertical;min-height:80px}
+select.fi{cursor:pointer}
+
+/* ── TAGS ─────────────────────── */
+.tag{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;white-space:nowrap}
+.t-teal{background:rgba(20,184,166,0.1);color:var(--teal)}
+.t-blue{background:rgba(2,132,199,0.1);color:#0284C7}
+.t-green{background:rgba(5,150,105,0.1);color:#059669}
+.t-red{background:rgba(220,38,38,0.1);color:#DC2626}
+.t-orange{background:rgba(234,88,12,0.1);color:#EA580C}
+.t-purple{background:rgba(124,58,237,0.1);color:#7C3AED}
+.t-yellow{background:rgba(217,119,6,0.1);color:#D97706}
+.t-gray{background:rgba(148,163,184,0.1);color:var(--slate-light)}
+
+/* ── PANELS ─────────────────────── */
+.panel{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius-xl);overflow:hidden}
+.panel-hd{padding:16px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.panel-title{font-size:15px;font-weight:700;color:var(--slate);letter-spacing:-0.03em;font-family:'Outfit',sans-serif}
+.panel-body{padding:16px 20px}
+
+/* ── PAGE HEADER ─────────────────────── */
+.page-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+.page-hd-title{font-size:20px;font-weight:700;color:var(--slate);letter-spacing:-0.4px;font-family:'Outfit',sans-serif}
+.page-hd-sub{font-size:11.5px;color:var(--slate-light);margin-top:2px}
+
+/* ── DATA TABLE ─────────────────────── */
+.data-table{width:100%;border-collapse:collapse}
+.data-table th{font-size:10.5px;font-weight:600;color:var(--slate-light);text-transform:uppercase;letter-spacing:0.4px;padding:10px 14px;background:var(--surface);border-bottom:1px solid var(--border);text-align:left;white-space:nowrap}
+.data-table td{padding:12px 14px;border-bottom:1px solid var(--border);font-size:13px;color:var(--slate-mid);vertical-align:middle}
+.data-table tr:hover td{background:rgba(20,184,166,0.03)}
+.td-name{font-size:13px;font-weight:600;color:var(--slate)}
+
+/* ── STAT CARDS ─────────────────────── */
+.stat-row{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:22px}
+.stat-card{border-radius:16px;padding:22px 24px;position:relative;overflow:hidden;cursor:default}
+.stat-card:hover{transform:translateY(-3px);box-shadow:0 16px 40px rgba(0,0,0,0.15)}
+.stat-card-1{background:linear-gradient(135deg,#0F766E 0%,#14B8A6 100%)}
+.stat-card-2{background:linear-gradient(135deg,#1D4ED8 0%,#3B82F6 100%)}
+.stat-card-3{background:linear-gradient(135deg,#6D28D9 0%,#8B5CF6 100%)}
+.stat-card-4{background:linear-gradient(135deg,#B45309 0%,#F59E0B 100%)}
+.stat-glow{position:absolute;top:-30px;right:-30px;width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,0.08);pointer-events:none}
+.stat-icon{width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;margin-bottom:16px}
+.stat-icon svg{width:20px;height:20px;stroke:white}
+.stat-val{font-size:36px;font-weight:900;color:white;letter-spacing:-2px;line-height:1;font-family:'Outfit',sans-serif}
+.stat-lbl{font-size:12px;color:rgba(255,255,255,0.75);margin-top:6px;font-weight:600}
+.stat-trend{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:20px;background:rgba(255,255,255,0.15);font-size:10px;font-weight:700;color:white;margin-top:10px}
+
+/* ── EMPTY STATE ─────────────────────── */
+.empty{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:60px 20px;color:var(--slate-light)}
+.empty-icon{width:52px;height:52px;background:var(--teal-light);border-radius:50%;display:flex;align-items:center;justify-content:center}
+.empty-icon svg{width:24px;height:24px;stroke:var(--teal)}
+.empty-text{font-size:14px;font-weight:600;color:var(--slate-mid)}
+
+/* ── TOAST ─────────────────────── */
+.toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%) translateY(10px);background:#0F172A;color:white;padding:10px 20px;border-radius:20px;font-size:13px;font-weight:500;z-index:9999;opacity:0;transition:all 0.3s;pointer-events:none;white-space:nowrap;box-shadow:0 8px 24px rgba(0,0,0,0.25)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ── MODAL ─────────────────────── */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,0.55);backdrop-filter:blur(6px);z-index:2000;display:flex;align-items:center;justify-content:center}
+.modal{background:var(--card-bg);border:none;border-radius:18px;width:520px;max-width:95vw;max-height:90vh;box-shadow:0 32px 80px rgba(0,0,0,0.25);animation:slideUp 0.2s ease;overflow:hidden}
+.modal-title{font-size:17px;font-weight:700;color:var(--slate);margin-bottom:18px;font-family:'Outfit',sans-serif;letter-spacing:-0.03em}
+.mf{display:flex;gap:10px;justify-content:flex-end;margin-top:20px;padding-top:16px;border-top:1px solid var(--border)}
+
+/* ── AVATAR ─────────────────────── */
+.avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
+
+/* ── APP LAYOUT CLASSES ─────────────────────── */
+.app{display:flex;height:100vh;height:100dvh;overflow:hidden}
+.app-main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.app-content{flex:1;overflow-y:auto;padding:24px 28px;position:relative}
+
+/* Hamburger — topbar'da, yalnızca mobilde görünür */
+.hamburger-btn{display:none;align-items:center;justify-content:center;width:36px;height:36px;border:none;background:rgba(0,0,0,0.05);cursor:pointer;border-radius:9px;flex-shrink:0;padding:0;transition:background 0.15s}
+.hamburger-btn:hover{background:rgba(0,0,0,0.1)}
+.hamburger-btn svg{width:20px;height:20px;stroke:var(--slate-mid,#64748b);stroke-width:2;fill:none;strokeLinecap:round}
+
+/* Karartma katmanı */
+.mobile-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1001;backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);animation:fadeIn 0.2s ease}
+
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+
+/* ── TABLET ─────────────────────── */
+@media(max-width:1024px){
+  .stat-row{grid-template-columns:repeat(2,1fr)}
+  .app-content{padding:18px 20px}
+}
+
+/* ── MOBİL — Sidebar sağdan kayan profil-dropdown stili panel ── */
+@media(max-width:768px){
+  /* Layout — operio-original.css çakışmalarını geçersiz kıl */
+  html,body{overflow:hidden!important}
+  .app{flex-direction:column!important;overflow:hidden!important;height:100vh!important;height:100dvh!important}
+  .app-main{overflow:hidden!important;flex:1!important}
+
+  /* ── Sidebar → .profile-dropdown benzeri sağ panel ── */
+  .sidebar{
+    position:fixed!important;
+    right:-290px!important;
+    left:auto!important;
+    top:0!important;
+    width:272px!important;
+    min-width:272px!important;
+    height:100vh!important;
+    height:100dvh!important;
+    flex-direction:column!important;
+    /* profile-dropdown'la aynı yüzey rengi */
+    background:var(--card-bg)!important;
+    border-left:1px solid var(--border)!important;
+    border-right:none!important;
+    border-radius:20px 0 0 20px!important;
+    overflow-y:auto!important;
+    overflow-x:hidden!important;
+    z-index:1002;
+    transition:right 0.25s cubic-bezier(0.4,0,0.2,1)!important;
+    box-shadow:none!important;
+  }
+  .sidebar.mobile-open{
+    right:0!important;
+    box-shadow:-4px 0 48px rgba(0,0,0,0.18)!important;
+  }
+
+  /* Logo header — pd-header gradient gibi */
+  .sidebar .sidebar-logo{
+    background:linear-gradient(135deg,#0F766E,#0369A1)!important;
+    border-bottom:none!important;
+    padding:18px 16px 14px!important;
+    border-radius:20px 0 0 0!important;
+    overflow:hidden;
+    position:relative;
+  }
+  .sidebar .sidebar-logo::after{
+    content:'';
+    position:absolute;
+    top:-24px;right:-24px;
+    width:80px;height:80px;
+    background:rgba(255,255,255,0.06);
+    border-radius:50%;
+  }
+  /* Logo text her zaman görünür */
+  .sidebar .logo-text-wrap{display:flex!important}
+  .sidebar.collapsed .logo-text-wrap{display:flex!important}
+  .sidebar .logo-text{color:rgba(255,255,255,0.95)!important}
+  .sidebar .logo-sub{color:rgba(255,255,255,0.65)!important;font-size:10px!important;display:block!important}
+
+  /* Nav — pd-menu gibi */
+  .sidebar nav{
+    padding:6px!important;
+    flex:1;
+    overflow-y:auto;
+    background:none!important;
+  }
+
+  /* Bölüm başlıkları — pd-sep + küçük etiket */
+  .sidebar .nav-section{
+    color:var(--slate-light)!important;
+    font-size:9px!important;
+    font-weight:700!important;
+    letter-spacing:0.7px!important;
+    text-transform:uppercase!important;
+    padding:14px 10px 4px!important;
+    display:block!important;
+  }
+
+  /* Nav linkleri — pd-item stili */
+  .sidebar .nav-link{
+    display:flex!important;
+    align-items:center!important;
+    gap:10px!important;
+    padding:9px 10px!important;
+    border-radius:9px!important;
+    color:var(--slate-mid)!important;
+    font-size:12px!important;
+    font-weight:500!important;
+    background:none!important;
+    border-left:none!important;
+  }
+  .sidebar .nav-link:hover{
+    background:var(--surface)!important;
+    color:var(--slate)!important;
+  }
+  .sidebar .nav-link.active{
+    background:rgba(20,184,166,0.1)!important;
+    color:var(--teal-mid,#0d9488)!important;
+    border-left:none!important;
+  }
+  .sidebar .nav-icon{width:15px!important;height:15px!important;flex-shrink:0}
+  .sidebar .nav-icon svg{width:15px!important;height:15px!important;stroke:var(--slate-light)!important}
+  .sidebar .nav-link.active .nav-icon svg{stroke:var(--teal-mid,#0d9488)!important}
+  .sidebar .nav-link:hover .nav-icon svg{stroke:var(--teal-mid,#0d9488)!important}
+  .sidebar .nav-label{display:inline!important;font-size:12px!important}
+  .sidebar .nav-badge{font-size:8px!important;padding:1px 5px!important}
+
+  /* Bölümler arası ince çizgi */
+  .sidebar nav>div+div{border-top:1px solid var(--border);margin-top:2px;padding-top:2px}
+
+  /* Karmaşık öğeleri gizle */
+  .user-pill,.role-switcher,.sidebar-footer,.sidebar-toggle-btn{display:none!important}
+
+  /* Collapsed override — mobilde tam genişlikte aç */
+  .sidebar.collapsed{width:272px!important;min-width:272px!important}
+  .sidebar.collapsed .nav-label{display:inline!important}
+  .sidebar.collapsed .nav-section{display:block!important}
+
+  /* ── Hamburger ── */
+  .hamburger-btn{display:flex}
+
+  /* ── Topbar ── */
+  .topbar{padding:0 14px;height:58px;gap:8px}
+  .ai-search-trigger{display:none!important}
+  .lang-switcher{display:none!important}
+  .topbar-crumb{display:none!important}
+
+  /* ── İçerik ── */
+  .app-content{padding:14px 16px}
+  .page-hd{flex-direction:column;align-items:flex-start;gap:10px}
+
+  /* ── Tablolar ── */
+  .panel{overflow-x:auto}
+  .data-table{min-width:520px}
+  .data-table th,.data-table td{padding:9px 10px;font-size:12px}
+
+  /* ── Profil trigger ── */
+  .profile-trigger .pname,.profile-trigger .prole,.profile-trigger .pchev{display:none}
+  .profile-trigger{padding:5px}
+
+  /* ── Açılır paneller ── */
+  .notif-panel{right:14px!important;left:14px!important;width:auto!important;top:66px!important;max-height:75vh!important}
+  .req-panel{right:14px!important;left:14px!important;width:auto!important;top:66px!important;max-height:75vh!important}
+  .profile-dropdown{width:min(260px,calc(100vw - 28px))}
+
+  /* ── Stat kartları ── */
+  .stat-row{grid-template-columns:1fr 1fr!important;gap:10px}
+  .stat-card{padding:14px 16px}
+  .stat-val{font-size:24px!important}
+
+  /* ── Form / Modal / Toast ── */
+  .fr{flex-direction:column}
+  .modal{width:96vw!important;max-width:96vw!important;max-height:90vh!important}
+  .mf{flex-direction:column}
+  .mf .btn{width:100%;justify-content:center}
+  .toast{max-width:calc(100vw - 32px);white-space:normal;text-align:center;font-size:12px}
+}
+
+/* ── KÜÇÜK MOBİL ─────────────────────── */
+@media(max-width:480px){
+  .stat-row{grid-template-columns:1fr!important}
+  .topbar{padding:0 12px;height:54px}
+  .app-content{padding:10px 12px}
+  .page-hd-title{font-size:16px}
+  .stat-val{font-size:20px!important}
+  .modal{max-height:95vh!important}
+}

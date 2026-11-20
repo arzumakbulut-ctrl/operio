@@ -1,0 +1,460 @@
+{
+  "app": {
+    "name": "Operio",
+    "tagline": "Operating Room Management System",
+    "loading": "Loading…",
+    "error": "An error occurred",
+    "notFound": "Page not found",
+    "backHome": "Back to Home",
+    "backButton": "← Go Back",
+    "comingSoon": "Coming Soon"
+  },
+
+  "auth": {
+    "welcome": "Welcome",
+    "login": "Sign In",
+    "loginSubtitle": "Continue with your institutional email and password",
+    "email": "Email",
+    "emailPlaceholder": "name@institution.com",
+    "password": "Password",
+    "passwordPlaceholder": "••••••••",
+    "loginButton": "Sign In",
+    "loggingIn": "Signing in…",
+    "logout": "Sign Out",
+    "roleSelection": "Role Selection",
+    "roleSelectionSubtitle": "Your registered role is shown below",
+    "continueButton": "Continue →",
+    "twoFactor": "Two-Factor Authentication",
+    "twoFactorSubtitle": "Enter the 6-digit code sent to your phone",
+    "twoFactorButton": "Sign In ✓",
+    "invalidCredentials": "Incorrect email or password",
+    "accountLocked": "Account locked for {{minutes}} minutes",
+    "demoTitle": "Demo accounts",
+    "back": "← Back"
+  },
+
+  "nav": {
+    "dashboard": "Dashboard",
+    "institutionManagement": "Institution Management",
+    "roomManagement": "Room Management",
+    "calendar": "Occupancy Calendar",
+    "doctorManagement": "Doctor Management",
+    "staffList": "Staff List",
+    "rolesPermissions": "Roles & Permissions",
+    "procedures": "Procedures",
+    "patientRecords": "Patient Records",
+    "workLists": "Work Lists",
+    "overtimeCalc": "Overtime Calculator",
+    "statistics": "Statistics",
+    "reports": "Reports",
+    "efficiency": "Room Efficiency",
+    "pendingApprovals": "Pending Approvals",
+    "teamPlan": "Team Plan",
+    "anesthesiaForm": "Anesthesia Form",
+    "deviceInventory": "Device Inventory",
+    "sterilesets": "Surgical Sets",
+    "setTracking": "Set Tracking Panel",
+    "sterileStorage": "Sterile Storage",
+    "singleInstruments": "Single Instruments",
+    "surgeryRequest": "Surgery Request",
+    "myAppointments": "My Appointments",
+    "surgeryCards": "Surgery Cards",
+    "myProfile": "My Profile",
+    "casePrep": "Case Preparation",
+    "countForm": "Count Form",
+    "patientTracking": "Patient Tracking",
+    "surgeryList": "Surgery List",
+    "qrLabels": "QR Label Generator",
+    "pricing": "Pricing",
+    "subscription": "Subscription Management",
+    "subscription_section": "Subscription"
+  },
+
+  "sidebar": {
+    "collapse": "Collapse",
+    "expand": "Expand",
+    "themeLight": "☀ Light",
+    "themeDark": "🌙 Dark",
+    "switchRole": "Switch Role"
+  },
+
+  "topbar": {
+    "notifications": "Notifications",
+    "markAllRead": "Mark all as read",
+    "noNotifications": "No notifications",
+    "aiAssistant": "Operia",
+    "aiShortcut": "⌘K",
+    "profile": "My Profile",
+    "settings": "Settings",
+    "help": "Help",
+    "logout": "Sign Out",
+    "live": "Live",
+    "offline": "Offline"
+  },
+
+  "dashboard": {
+    "title": "Dashboard",
+    "subtitle": "Daily surgery schedule and summary",
+    "todaySurgeries": "Today's Surgeries",
+    "activeRooms": "Active OR",
+    "onDutyStaff": "On-Duty Staff",
+    "weekTotal": "This Week Total",
+    "surgeryProgram": "Daily Surgery Schedule",
+    "roomStatus": "Room Status",
+    "recentNotifications": "Recent Notifications",
+    "allSurgeries": "All",
+    "mySurgeries": "Mine",
+    "addSurgery": "+ Add",
+    "detail": "Detail →",
+    "noSurgeries": "No surgeries in this list"
+  },
+
+  "surgery": {
+    "title": "Surgery",
+    "add": "Add Surgery",
+    "addNew": "Add New Surgery",
+    "name": "Surgery Name",
+    "namePlaceholder": "e.g. Laparoscopic Cholecystectomy",
+    "surgeon": "Surgeon",
+    "surgeonPlaceholder": "Dr. ...",
+    "room": "Room",
+    "time": "Time",
+    "duration": "Duration (min)",
+    "patient": "Patient",
+    "patientPlaceholder": "Full Name (Age M/F)",
+    "branch": "Specialty",
+    "notes": "Notes",
+    "team": "Team",
+    "sterile_sets": "Sterile Sets",
+    "changeStatus": "Change Status",
+    "close": "Close",
+    "save": "Add Surgery",
+    "status": {
+      "WAITING": "Waiting",
+      "PREPARING": "Preparing",
+      "IN_PROGRESS": "In Progress",
+      "COMPLETED": "Completed",
+      "CANCELLED": "Cancelled",
+      "POSTPONED": "Postponed"
+    },
+    "team_roles": {
+      "cerrah": "Surgeon",
+      "scrub": "Scrub",
+      "anestezi": "Anesthesia",
+      "sirkule": "Circulator"
+    }
+  },
+
+  "room": {
+    "title": "Room",
+    "add": "Add Room",
+    "addNew": "Add New Room",
+    "name": "Room Name",
+    "namePlaceholder": "OR 7",
+    "capacity": "Capacity",
+    "primaryBranch": "Primary Specialty",
+    "changeStatus": "Change Status",
+    "status": {
+      "ACTIVE": "Active",
+      "IDLE": "Idle",
+      "RESERVED": "Reserved",
+      "MAINTENANCE": "Maintenance",
+      "CLOSED": "Closed"
+    }
+  },
+
+  "patient": {
+    "title": "Patient",
+    "add": "Add Patient",
+    "addNew": "Add New Patient",
+    "firstName": "First Name",
+    "lastName": "Last Name",
+    "fullName": "Full Name",
+    "tcNo": "National ID",
+    "tcPlaceholder": "11-digit ID number",
+    "dateOfBirth": "Date of Birth",
+    "gender": "Gender",
+    "genderMale": "Male",
+    "genderFemale": "Female",
+    "bloodType": "Blood Type",
+    "phone": "Phone",
+    "phonePlaceholder": "+90 5__ ___ __ __",
+    "plannedSurgery": "Planned Surgery",
+    "surgeryDate": "Surgery Date",
+    "status": {
+      "Ameliyatta": "In Surgery",
+      "Hazırlık": "Preparation",
+      "Serviste": "In Ward",
+      "Taburcu": "Discharged"
+    },
+    "save": "Save Patient",
+    "notFound": "No patients found",
+    "count": "{{count}} patients registered"
+  },
+
+  "staff": {
+    "title": "Staff",
+    "add": "Add Staff",
+    "addNew": "Add New Staff Member",
+    "fullName": "Full Name",
+    "namePlaceholder": "RN. First Last",
+    "role": "Role",
+    "department": "Department",
+    "shift": "Shift",
+    "status": {
+      "nobette": "On Duty",
+      "izinde": "On Leave",
+      "tatilde": "On Vacation"
+    },
+    "save": "Save",
+    "delete": "Delete",
+    "notFound": "No staff found",
+    "count": "{{count}} staff registered"
+  },
+
+  "doctor": {
+    "title": "Doctor",
+    "add": "Add Doctor",
+    "invite": "Send Invitation",
+    "addNew": "Add / Invite Doctor",
+    "fullName": "Full Name",
+    "namePlaceholder": "Dr. First Last",
+    "title_label": "Title",
+    "branch": "Specialty",
+    "email": "Email",
+    "emailPlaceholder": "dr@hospital.com",
+    "approve": "✓ Approve",
+    "reject": "✕ Reject",
+    "remove": "Remove",
+    "status": {
+      "aktif": "✓ Active",
+      "bekliyor": "⏳ Pending Approval"
+    },
+    "tabs": {
+      "active": "Active Doctors",
+      "pending": "Pending Approval"
+    },
+    "noPending": "No pending requests",
+    "count": {
+      "active": "{{count}} active",
+      "pending": "{{count}} pending approval"
+    }
+  },
+
+  "sterileSet": {
+    "title": "Surgical Set",
+    "add": "Add Set",
+    "addNew": "Add New Surgical Set",
+    "name": "Set Name",
+    "namePlaceholder": "e.g. Laparoscopy Set A",
+    "code": "Set Code",
+    "codePlaceholder": "LAP-A-001",
+    "quantity": "Quantity",
+    "shelf": "Shelf Location",
+    "shelfPlaceholder": "e.g. A-1",
+    "initialStatus": "Initial Status",
+    "save": "Save Set",
+    "status": {
+      "STERILE": "Sterile — Ready",
+      "IN_USE": "In Use",
+      "STERILIZING": "Sterilizing",
+      "FAULTY": "Faulty",
+      "RETIRED": "Retired"
+    },
+    "tracking": {
+      "title": "Set Tracking",
+      "stage": "Stage",
+      "stages": {
+        "teslim_alindi": "Received",
+        "yikama": "Washing",
+        "sterilizasyon": "Sterilization",
+        "steril": "Sterile Ready",
+        "depo": "Stored"
+      }
+    },
+    "count": "{{count}} sets registered",
+    "readyCount": "{{count}} sterile ready"
+  },
+
+  "qrScanner": {
+    "title": "Scan QR Code",
+    "hint": "Hold the set label's QR code in front of the camera",
+    "status": {
+      "idle": "Initializing…",
+      "requesting": "Waiting for camera permission…",
+      "scanning": "Scanning",
+      "error": "Camera error"
+    },
+    "active": "ACTIVE",
+    "permissionDenied": "Camera permission denied. Please enable it in browser settings.",
+    "notFound": "Camera not found.",
+    "manualEntry": "⌨️ Enter QR Code Manually",
+    "backToCamera": "← Back to Camera",
+    "manualPlaceholder": "Enter QR code content",
+    "confirm": "Confirm",
+    "torch": "Flashlight",
+    "setNotFound": "Set not found: {{code}}",
+    "setFound": "✅ Set identified: {{name}}"
+  },
+
+  "ai": {
+    "title": "Operia",
+    "beta": "BETA",
+    "subtitle": "OR Management AI Assistant · Powered by Claude",
+    "greeting": "Hello! I'm Operia.",
+    "greetingSubtitle": "You can ask about today's surgery schedule, room status and sterile sets, or add a new surgery in natural language.",
+    "quickPrompts": {
+      "summarize": "Summarize today's surgery schedule",
+      "emptyRooms": "Which rooms are currently available?",
+      "sterileStatus": "What is the sterile set status?",
+      "staffOnDuty": "List on-duty staff",
+      "completed": "Which surgeries have been completed?"
+    },
+    "placeholder": "Ask a question or give an instruction… (Enter to send, Shift+Enter for new line)",
+    "shortcut": "⌘K to open/close · Esc to close",
+    "poweredBy": "Powered by Claude",
+    "clear": "Clear",
+    "stop": "■",
+    "send": "Send",
+    "actionApprove": "✓ Confirm & Apply",
+    "actionCancel": "Cancel",
+    "actionApplied": "✅ Action applied successfully",
+    "actionFailed": "⚠️ Action could not be applied",
+    "errorOccurred": "Error: {{message}}",
+    "notConfigured": "AI service not configured"
+  },
+
+  "billing": {
+    "title": "Pricing",
+    "subtitle": "Choose the Right Plan for Your Institution",
+    "trialDesc": "Try free for 14 days. No credit card required.",
+    "monthly": "Monthly",
+    "annual": "Annual",
+    "annualDiscount": "20%",
+    "mostPopular": "Most Popular",
+    "contactUs": "Contact Us →",
+    "trialButton": "Start 14-Day Free Trial",
+    "creditCard": "💳 Pay with Card (Stripe)",
+    "perMonth": "/mo",
+    "annualNote": "Billed annually · Save 20%",
+    "unlimitedUsers": "Unlimited users",
+    "maxUsers": "Up to {{count}} users",
+    "unlimitedRooms": "Unlimited rooms",
+    "maxRooms": "Up to {{count}} rooms",
+    "coupon": "🎫 Coupon Code",
+    "couponPlaceholder": "Enter coupon code",
+    "couponApply": "Apply",
+    "couponApplied": "✅ {{code}} applied — {{discount}}",
+    "couponInvalid": "Invalid coupon",
+    "selectPlanFirst": "Please select a plan first",
+    "seats": "👥 User Seats",
+    "seatsNote": "Additional fee applies for seats beyond plan limit",
+    "faq": "Frequently Asked Questions",
+    "redirecting": "Redirecting…",
+    "subscription": {
+      "title": "Subscription Management",
+      "subtitle": "Your plan, invoices and usage limits",
+      "changePlan": "Change Plan →",
+      "currentPlan": "Current Plan",
+      "trialDaysLeft": "{{count}} days left in your trial",
+      "nextRenewal": "Next renewal",
+      "trialEnds": "Trial ends",
+      "cancel": "Cancel",
+      "cancelTitle": "Cancel Subscription",
+      "cancelWarning": "You are about to cancel your subscription.",
+      "cancelNote": "After cancellation, you will retain access until the end of the current billing period.",
+      "cancelConfirm": "Yes, Cancel",
+      "cancelBack": "Go Back",
+      "cancelling": "Cancelling…",
+      "cancelSuccess": "Subscription cancelled",
+      "upgradePlan": "Upgrade Plan",
+      "limits": "Usage Limits",
+      "limitWarning": "⚠️ Approaching limit — please upgrade",
+      "invoices": "Invoices",
+      "invoiceCount": "{{count}} invoices",
+      "downloadPdf": "Download PDF",
+      "noInvoices": "No invoices yet",
+      "status": {
+        "trial": "Trial Period",
+        "active": "Active",
+        "past_due": "Payment Due",
+        "cancelled": "Cancelled",
+        "expired": "Expired"
+      }
+    }
+  },
+
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "close": "Close",
+    "add": "+ Add",
+    "confirm": "Confirm",
+    "back": "← Back",
+    "next": "Continue →",
+    "search": "🔍 Search...",
+    "filter": "Filter",
+    "all": "All",
+    "none": "None",
+    "yes": "Yes",
+    "no": "No",
+    "loading": "Loading…",
+    "error": "Error",
+    "success": "Success",
+    "warning": "Warning",
+    "info": "Info",
+    "required": "Required",
+    "optional": "Optional",
+    "notFound": "Not Found",
+    "noData": "No data",
+    "actions": "Actions",
+    "status": "Status",
+    "date": "Date",
+    "time": "Time",
+    "duration": "Duration",
+    "total": "Total",
+    "count": "Count",
+    "name": "Name",
+    "code": "Code",
+    "type": "Type",
+    "note": "Note",
+    "detail": "Detail",
+    "summary": "Summary",
+    "print": "Print",
+    "download": "Download",
+    "upload": "Upload",
+    "refresh": "Refresh",
+    "settings": "Settings",
+    "language": "Language",
+    "theme": "Theme",
+    "darkMode": "Dark Mode",
+    "lightMode": "Light Mode"
+  },
+
+  "notifications": {
+    "types": {
+      "uyari": "Warning",
+      "tamamlandi": "Completed",
+      "katilim": "Join Request",
+      "sistem": "System",
+      "ekipman": "Equipment"
+    },
+    "surgeryPostponed": "Surgery postponed",
+    "equipmentMaintenance": "Equipment under maintenance",
+    "surgeryCompleted": "Surgery completed",
+    "joinRequest": "Join request"
+  },
+
+  "placeholder": {
+    "default": "This module is under development and will be available soon."
+  },
+
+  "language": {
+    "select": "Select Language",
+    "tr": "Türkçe",
+    "en": "English",
+    "changed": "Language changed"
+  }
+}

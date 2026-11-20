@@ -1,0 +1,60 @@
+{
+  "title":           "Surgery",
+  "plural":          "Surgeries",
+  "program":         "Daily Surgery Program",
+  "add":             "+ Add Surgery",
+  "new":             "Add New Surgery",
+  "detail":          "Surgery Detail",
+  "name":            "Surgery Name",
+  "namePlaceholder": "e.g. Laparoscopic Cholecystectomy",
+  "branch":          "Branch",
+  "surgeon":         "Surgeon",
+  "surgeonPlaceholder":"Dr. ...",
+  "room":            "Room",
+  "startTime":       "Start Time",
+  "endTime":         "End Time",
+  "duration":        "Duration",
+  "durationUnit":    "minutes",
+  "patient":         "Patient",
+  "patientPlaceholder":"Full Name (Age M/F)",
+  "notes":           "Notes",
+  "team":            "Team",
+  "sets":            "Sets Used",
+  "changeStatus":    "Change Status",
+  "statusChanged":   "Status updated ✓",
+  "added":           "Surgery added ✓",
+  "deleted":         "Surgery removed",
+  "notFound":        "Surgery not found",
+  "noSurgeries":     "No surgeries in this list",
+
+  "teamRoles": {
+    "surgeon":   "Surgeon",
+    "scrub":     "Scrub Nurse",
+    "anesthesia":"Anesthesia",
+    "circulate": "Circulating Nurse"
+  },
+
+  "branches": {
+    "generalSurgery": "General Surgery",
+    "orthopedics":    "Orthopedics",
+    "ophthalmology":  "Ophthalmology",
+    "ent":            "ENT",
+    "neurosurgery":   "Neurosurgery",
+    "urology":        "Urology",
+    "cardiology":     "Cardiology",
+    "cardiovascular": "Cardiovascular Surgery",
+    "plastic":        "Plastic Surgery",
+    "gynecology":     "Gynecology",
+    "pediatrics":     "Pediatric Surgery"
+  },
+
+  "stats": {
+    "today":          "Today's Surgeries",
+    "thisWeek":       "This Week",
+    "avgDuration":    "Avg. Surgery Duration",
+    "occupancy":      "Occupancy Rate",
+    "active":         "Active",
+    "waiting":        "Waiting",
+    "completed":      "Completed"
+  }
+}

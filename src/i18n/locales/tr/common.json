@@ -1,0 +1,460 @@
+{
+  "app": {
+    "name": "Operio",
+    "tagline": "Ameliyathane Yönetim Sistemi",
+    "loading": "Yükleniyor…",
+    "error": "Bir hata oluştu",
+    "notFound": "Sayfa bulunamadı",
+    "backHome": "Ana Sayfaya Dön",
+    "backButton": "← Geri Dön",
+    "comingSoon": "Yakında"
+  },
+
+  "auth": {
+    "welcome": "Hoş Geldiniz",
+    "login": "Giriş Yapın",
+    "loginSubtitle": "Kurumsal e-posta ve şifrenizle devam edin",
+    "email": "E-posta",
+    "emailPlaceholder": "ad@kurum.com",
+    "password": "Şifre",
+    "passwordPlaceholder": "••••••••",
+    "loginButton": "Giriş Yap",
+    "loggingIn": "Giriş yapılıyor…",
+    "logout": "Çıkış Yap",
+    "roleSelection": "Rol Seçimi",
+    "roleSelectionSubtitle": "Sisteme kayıtlı rolünüz aşağıda gösterilmektedir",
+    "continueButton": "Devam →",
+    "twoFactor": "İki Faktörlü Doğrulama",
+    "twoFactorSubtitle": "Telefonunuza gönderilen 6 haneli kodu girin",
+    "twoFactorButton": "Giriş Yap ✓",
+    "invalidCredentials": "E-posta veya şifre hatalı",
+    "accountLocked": "Hesap {{minutes}} dakika kilitli",
+    "demoTitle": "Demo hesapları",
+    "back": "← Geri"
+  },
+
+  "nav": {
+    "dashboard": "Kontrol Paneli",
+    "institutionManagement": "Kurum Yönetimi",
+    "roomManagement": "Salon Yönetimi",
+    "calendar": "Doluluk Takvimi",
+    "doctorManagement": "Doktor Yönetimi",
+    "staffList": "Personel Listesi",
+    "rolesPermissions": "Yetki & Roller",
+    "procedures": "Prosedürler",
+    "patientRecords": "Hasta Kayıtları",
+    "workLists": "Çalışma Listeleri",
+    "overtimeCalc": "Mesai Hesaplama",
+    "statistics": "İstatistikler",
+    "reports": "Raporlar",
+    "efficiency": "Salon Verimliliği",
+    "pendingApprovals": "Onay Bekleyenler",
+    "teamPlan": "Ekip Planı",
+    "anesthesiaForm": "Anestezi Formu",
+    "deviceInventory": "Cihaz Envanteri",
+    "sterilesets": "Cerrahi Setler",
+    "setTracking": "Set Takip Paneli",
+    "sterileStorage": "Steril Depo",
+    "singleInstruments": "Tekli Aletler",
+    "surgeryRequest": "Ameliyat Talebi",
+    "myAppointments": "Randevu Durumlarım",
+    "surgeryCards": "Ameliyat Kartları",
+    "myProfile": "Profilim",
+    "casePrep": "Vaka Hazırlığı",
+    "countForm": "Sayım Formu",
+    "patientTracking": "Hasta Takibi",
+    "surgeryList": "Ameliyat Listesi",
+    "qrLabels": "QR Etiket Üretici",
+    "pricing": "Fiyatlandırma",
+    "subscription": "Abonelik Yönetimi",
+    "subscription_section": "Abonelik"
+  },
+
+  "sidebar": {
+    "collapse": "Daralt",
+    "expand": "Genişlet",
+    "themeLight": "☀ Açık",
+    "themeDark": "🌙 Koyu",
+    "switchRole": "Rol Değiştir"
+  },
+
+  "topbar": {
+    "notifications": "Bildirimler",
+    "markAllRead": "Tümünü okundu say",
+    "noNotifications": "Bildirim yok",
+    "aiAssistant": "Operia",
+    "aiShortcut": "⌘K",
+    "profile": "Profilim",
+    "settings": "Ayarlar",
+    "help": "Yardım",
+    "logout": "Çıkış Yap",
+    "live": "Canlı",
+    "offline": "Çevrimdışı"
+  },
+
+  "dashboard": {
+    "title": "Kontrol Paneli",
+    "subtitle": "Günlük ameliyat programı ve özet",
+    "todaySurgeries": "Bugünkü Ameliyat",
+    "activeRooms": "Aktif Ameliyat Salonu",
+    "onDutyStaff": "Nöbetteki Personel",
+    "weekTotal": "Bu Hafta Toplam",
+    "surgeryProgram": "Günlük Ameliyat Programı",
+    "roomStatus": "Salon Durumu",
+    "recentNotifications": "Son Bildirimler",
+    "allSurgeries": "Tümü",
+    "mySurgeries": "Benim",
+    "addSurgery": "+ Ekle",
+    "detail": "Detay →",
+    "noSurgeries": "Bu listede ameliyat yok"
+  },
+
+  "surgery": {
+    "title": "Ameliyat",
+    "add": "Ameliyat Ekle",
+    "addNew": "Yeni Ameliyat Ekle",
+    "name": "Ameliyat Adı",
+    "namePlaceholder": "Ör: Laparoskopik Kolesistektomi",
+    "surgeon": "Cerrah",
+    "surgeonPlaceholder": "Dr. ...",
+    "room": "Salon",
+    "time": "Saat",
+    "duration": "Süre (dk)",
+    "patient": "Hasta",
+    "patientPlaceholder": "Ad Soyad (Yaş C/K)",
+    "branch": "Branş",
+    "notes": "Notlar",
+    "team": "Ekip",
+    "sterile_sets": "Steril Setler",
+    "changeStatus": "Durum Değiştir",
+    "close": "Kapat",
+    "save": "Ameliyat Ekle",
+    "status": {
+      "WAITING": "Bekliyor",
+      "PREPARING": "Hazırlanıyor",
+      "IN_PROGRESS": "Devam Ediyor",
+      "COMPLETED": "Tamamlandı",
+      "CANCELLED": "İptal Edildi",
+      "POSTPONED": "Ertelendi"
+    },
+    "team_roles": {
+      "cerrah": "Cerrah",
+      "scrub": "Scrub",
+      "anestezi": "Anestezi",
+      "sirkule": "Sirkülasyon"
+    }
+  },
+
+  "room": {
+    "title": "Salon",
+    "add": "Salon Ekle",
+    "addNew": "Yeni Salon Ekle",
+    "name": "Salon Adı",
+    "namePlaceholder": "Salon 7",
+    "capacity": "Kapasite",
+    "primaryBranch": "Birincil Branş",
+    "changeStatus": "Durum Değiştir",
+    "status": {
+      "ACTIVE": "Aktif",
+      "IDLE": "Boşta",
+      "RESERVED": "Rezerve",
+      "MAINTENANCE": "Bakımda",
+      "CLOSED": "Kapalı"
+    }
+  },
+
+  "patient": {
+    "title": "Hasta",
+    "add": "Hasta Ekle",
+    "addNew": "Yeni Hasta Ekle",
+    "firstName": "Ad",
+    "lastName": "Soyad",
+    "fullName": "Ad Soyad",
+    "tcNo": "TC Kimlik No",
+    "tcPlaceholder": "11 haneli TC",
+    "dateOfBirth": "Doğum Tarihi",
+    "gender": "Cinsiyet",
+    "genderMale": "Erkek",
+    "genderFemale": "Kadın",
+    "bloodType": "Kan Grubu",
+    "phone": "Telefon",
+    "phonePlaceholder": "05__ ___ __ __",
+    "plannedSurgery": "Planlanan Ameliyat",
+    "surgeryDate": "Ameliyat Tarihi",
+    "status": {
+      "Ameliyatta": "Ameliyatta",
+      "Hazırlık": "Hazırlık",
+      "Serviste": "Serviste",
+      "Taburcu": "Taburcu"
+    },
+    "save": "Hasta Kaydet",
+    "notFound": "Hasta bulunamadı",
+    "count": "{{count}} hasta kayıtlı"
+  },
+
+  "staff": {
+    "title": "Personel",
+    "add": "Personel Ekle",
+    "addNew": "Yeni Personel Ekle",
+    "fullName": "Ad Soyad",
+    "namePlaceholder": "Hem. Ad Soyad",
+    "role": "Rol",
+    "department": "Departman",
+    "shift": "Nöbet",
+    "status": {
+      "nobette": "Nöbette",
+      "izinde": "İzinde",
+      "tatilde": "Tatilde"
+    },
+    "save": "Kaydet",
+    "delete": "Sil",
+    "notFound": "Personel bulunamadı",
+    "count": "{{count}} kayıtlı personel"
+  },
+
+  "doctor": {
+    "title": "Doktor",
+    "add": "Doktor Ekle",
+    "invite": "Davet Gönder",
+    "addNew": "Doktor Ekle / Davet Et",
+    "fullName": "Ad Soyad",
+    "namePlaceholder": "Dr. Ad Soyad",
+    "title_label": "Ünvan",
+    "branch": "Branş",
+    "email": "E-posta",
+    "emailPlaceholder": "dr@hastane.tr",
+    "approve": "✓ Onayla",
+    "reject": "✕ Reddet",
+    "remove": "Kaldır",
+    "status": {
+      "aktif": "✓ Aktif",
+      "bekliyor": "⏳ Onay Bekleniyor"
+    },
+    "tabs": {
+      "active": "Aktif Doktorlar",
+      "pending": "Onay Bekleyen"
+    },
+    "noPending": "Onay bekleyen istek yok",
+    "count": {
+      "active": "{{count}} aktif",
+      "pending": "{{count}} onay bekleyen"
+    }
+  },
+
+  "sterileSet": {
+    "title": "Cerrahi Set",
+    "add": "Set Ekle",
+    "addNew": "Yeni Cerrahi Set Ekle",
+    "name": "Set Adı",
+    "namePlaceholder": "Ör: Laparoskopi Seti A",
+    "code": "Set Kodu",
+    "codePlaceholder": "LAP-A-001",
+    "quantity": "Adet",
+    "shelf": "Raf Konumu",
+    "shelfPlaceholder": "Ör: A-1",
+    "initialStatus": "Başlangıç Durumu",
+    "save": "Seti Kaydet",
+    "status": {
+      "STERILE": "Steril — Hazır",
+      "IN_USE": "Kullanımda",
+      "STERILIZING": "Sterilizasyonda",
+      "FAULTY": "Arızalı",
+      "RETIRED": "Hizmet Dışı"
+    },
+    "tracking": {
+      "title": "Set Takip",
+      "stage": "Aşama",
+      "stages": {
+        "teslim_alindi": "Teslim Alındı",
+        "yikama": "Yıkama",
+        "sterilizasyon": "Sterilizasyon",
+        "steril": "Steril Hazır",
+        "depo": "Depoya Kaldırıldı"
+      }
+    },
+    "count": "{{count}} set kayıtlı",
+    "readyCount": "{{count}} steril hazır"
+  },
+
+  "qrScanner": {
+    "title": "QR Kod Tara",
+    "hint": "Set etiketindeki QR kodu kameranın önüne tutun",
+    "status": {
+      "idle": "Hazırlanıyor…",
+      "requesting": "Kamera izni bekleniyor…",
+      "scanning": "Taranıyor",
+      "error": "Kamera hatası"
+    },
+    "active": "AKTİF",
+    "permissionDenied": "Kamera izni reddedildi. Tarayıcı ayarlarından izin verin.",
+    "notFound": "Kamera bulunamadı.",
+    "manualEntry": "⌨️ Manuel QR Kodu Gir",
+    "backToCamera": "← Kameraya Dön",
+    "manualPlaceholder": "QR kod içeriğini girin",
+    "confirm": "Onayla",
+    "torch": "El Feneri",
+    "setNotFound": "Set bulunamadı: {{code}}",
+    "setFound": "✅ Set tanındı: {{name}}"
+  },
+
+  "ai": {
+    "title": "Operia",
+    "beta": "BETA",
+    "subtitle": "Ameliyathane AI Asistanı · Claude tarafından desteklenmektedir",
+    "greeting": "Merhaba! Ben Operia.",
+    "greetingSubtitle": "Bugünkü ameliyat programı, salon durumları ve steril setler hakkında soru sorabilir, doğal dilde yeni ameliyat ekleyebilirsiniz.",
+    "quickPrompts": {
+      "summarize": "Bugünkü ameliyat programını özetle",
+      "emptyRooms": "Hangi salonlar şu an boş?",
+      "sterileStatus": "Steril set durumları nasıl?",
+      "staffOnDuty": "Nöbetteki personeli listele",
+      "completed": "Tamamlanan ameliyatlar hangileri?"
+    },
+    "placeholder": "Soru sor veya talimat ver… (Enter gönderer, Shift+Enter satır ekler)",
+    "shortcut": "⌘K ile aç/kapat · Esc ile kapat",
+    "poweredBy": "Claude tarafından desteklenmektedir",
+    "clear": "Temizle",
+    "stop": "■",
+    "send": "Gönder",
+    "actionApprove": "✓ Onayla ve Uygula",
+    "actionCancel": "İptal",
+    "actionApplied": "✅ İşlem başarıyla uygulandı",
+    "actionFailed": "⚠️ İşlem uygulanamadı",
+    "errorOccurred": "Hata: {{message}}",
+    "notConfigured": "AI servisi yapılandırılmamış"
+  },
+
+  "billing": {
+    "title": "Fiyatlandırma",
+    "subtitle": "Kurumunuza Uygun Planı Seçin",
+    "trialDesc": "14 gün ücretsiz deneyin. Kredi kartı gerekmez.",
+    "monthly": "Aylık",
+    "annual": "Yıllık",
+    "annualDiscount": "%20",
+    "mostPopular": "En Popüler",
+    "contactUs": "Bize Ulaşın →",
+    "trialButton": "14 Gün Ücretsiz Dene",
+    "creditCard": "💳 Kredi Kartı ile Öde (Stripe)",
+    "perMonth": "/ay",
+    "annualNote": "Yıllık faturalanır · %20 tasarruf",
+    "unlimitedUsers": "Sınırsız kullanıcı",
+    "maxUsers": "{{count}} kullanıcıya kadar",
+    "unlimitedRooms": "Sınırsız salon",
+    "maxRooms": "{{count}} salona kadar",
+    "coupon": "🎫 Kupon Kodu",
+    "couponPlaceholder": "Kupon kodunu girin",
+    "couponApply": "Uygula",
+    "couponApplied": "✅ {{code}} uygulandı — {{discount}}",
+    "couponInvalid": "Geçersiz kupon",
+    "selectPlanFirst": "Önce bir plan seçin",
+    "seats": "👥 Kullanıcı Koltukları",
+    "seatsNote": "10 koltuk üzeri için ek ücret uygulanır",
+    "faq": "Sık Sorulan Sorular",
+    "redirecting": "Yönlendiriliyor…",
+    "subscription": {
+      "title": "Abonelik Yönetimi",
+      "subtitle": "Planınız, faturalarınız ve kullanım limitleriniz",
+      "changePlan": "Plan Değiştir →",
+      "currentPlan": "Mevcut Plan",
+      "trialDaysLeft": "Deneme sürenizde {{count}} gün kaldı",
+      "nextRenewal": "Sonraki yenileme",
+      "trialEnds": "Deneme süresi bitiş",
+      "cancel": "İptal Et",
+      "cancelTitle": "Aboneliği İptal Et",
+      "cancelWarning": "Aboneliğinizi iptal etmek üzeresiniz.",
+      "cancelNote": "İptal ettikten sonra mevcut dönem sonuna kadar erişiminiz devam edecek.",
+      "cancelConfirm": "Evet, İptal Et",
+      "cancelBack": "Vazgeç",
+      "cancelling": "İptal ediliyor…",
+      "cancelSuccess": "Abonelik iptal edildi",
+      "upgradePlan": "Planı Yükselt",
+      "limits": "Kullanım Limitleri",
+      "limitWarning": "⚠️ Limite yaklaşıyorsunuz — plan yükseltin",
+      "invoices": "Faturalar",
+      "invoiceCount": "{{count}} fatura",
+      "downloadPdf": "PDF İndir",
+      "noInvoices": "Henüz fatura yok",
+      "status": {
+        "trial": "Deneme Süresi",
+        "active": "Aktif",
+        "past_due": "Ödeme Bekliyor",
+        "cancelled": "İptal Edildi",
+        "expired": "Süresi Doldu"
+      }
+    }
+  },
+
+  "common": {
+    "save": "Kaydet",
+    "cancel": "İptal",
+    "delete": "Sil",
+    "edit": "Düzenle",
+    "close": "Kapat",
+    "add": "+ Ekle",
+    "confirm": "Onayla",
+    "back": "← Geri",
+    "next": "Devam →",
+    "search": "🔍 Ara...",
+    "filter": "Filtrele",
+    "all": "Tümü",
+    "none": "Yok",
+    "yes": "Evet",
+    "no": "Hayır",
+    "loading": "Yükleniyor…",
+    "error": "Hata",
+    "success": "Başarılı",
+    "warning": "Uyarı",
+    "info": "Bilgi",
+    "required": "Zorunlu",
+    "optional": "Opsiyonel",
+    "notFound": "Bulunamadı",
+    "noData": "Veri yok",
+    "actions": "İşlemler",
+    "status": "Durum",
+    "date": "Tarih",
+    "time": "Saat",
+    "duration": "Süre",
+    "total": "Toplam",
+    "count": "Adet",
+    "name": "Ad",
+    "code": "Kod",
+    "type": "Tür",
+    "note": "Not",
+    "detail": "Detay",
+    "summary": "Özet",
+    "print": "Yazdır",
+    "download": "İndir",
+    "upload": "Yükle",
+    "refresh": "Yenile",
+    "settings": "Ayarlar",
+    "language": "Dil",
+    "theme": "Tema",
+    "darkMode": "Koyu Mod",
+    "lightMode": "Açık Mod"
+  },
+
+  "notifications": {
+    "types": {
+      "uyari": "Uyarı",
+      "tamamlandi": "Tamamlandı",
+      "katilim": "Katılım",
+      "sistem": "Sistem",
+      "ekipman": "Ekipman"
+    },
+    "surgeryPostponed": "Ameliyat ertelendi",
+    "equipmentMaintenance": "Ekipman bakımda",
+    "surgeryCompleted": "Ameliyat tamamlandı",
+    "joinRequest": "Katılım isteği"
+  },
+
+  "placeholder": {
+    "default": "Bu modül yapım aşamasındadır. Mimari kurulumu tamamlandıktan sonra buraya gerçek içerik eklenecek."
+  },
+
+  "language": {
+    "select": "Dil Seçin",
+    "tr": "Türkçe",
+    "en": "English",
+    "changed": "Dil değiştirildi"
+  }
+}
