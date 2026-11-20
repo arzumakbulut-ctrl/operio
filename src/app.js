@@ -12,6 +12,7 @@ const securityRoutes = require('./routes/security.routes');
 const aiRoutes       = require('./routes/ai.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const billingRoutes      = require('./routes/billing.routes');
+const deviceRoutes       = require('./routes/device.routes');
 const { patientRouter, roomRouter, setRouter, auditRouter } = require('./routes/other.routes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 
@@ -114,6 +115,7 @@ app.use('/api/audit',        auditRouter);
 app.use('/api/security',     securityRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/billing',      billingRoutes);
+app.use('/api/devices',      deviceRoutes);
 app.use('/api/ws',            notificationRoutes);
 app.use('/api/ai',          aiRoutes);
 

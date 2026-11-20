@@ -101,6 +101,25 @@ const notificationCreateSchema = z.object({
   message:      z.string().min(1).max(1000),
 });
 
+// ── CİHAZ (Sesli Kontrol) ────────────────────────────────────
+const deviceCreateSchema = z.object({
+  name:                    z.string().min(1).max(100),
+  deviceGroup:             z.enum(['light', 'table', 'electrosurgery']),
+  deviceType:              z.string().min(1).max(50),
+  roomId:                  z.string().uuid().optional(),
+  requiresPhysicalConfirm: z.boolean().optional(),
+});
+
+const deviceCommandSchema = z.object({
+  action: z.enum(['turn_on', 'turn_off', 'set_power', 'arm_move', 'invoke_action']),
+  value:  z.any().optional(),
+});
+
+const deviceConfigSchema = z.object({
+  driverKey: z.string().optional(),
+  mode:      z.enum(['SIM', 'REAL']).optional(),
+});
+
 // ── SAYFALAMA ────────────────────────────────────────────────
 const paginationSchema = z.object({
   page:  z.coerce.number().int().positive().default(1),
@@ -123,4 +142,7 @@ module.exports = {
   institutionCreateSchema,
   notificationCreateSchema,
   paginationSchema,
+  deviceCreateSchema,
+  deviceCommandSchema,
+  deviceConfigSchema,
 };
