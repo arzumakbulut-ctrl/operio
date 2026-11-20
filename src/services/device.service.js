@@ -38,14 +38,35 @@ async function createDevice({ data, institutionId, userId, req }) {
 }
 
 async function updateDeviceConfig({ id, data, institutionId, userId, req }) {
+  const old = await getDevice({ id, institutionId });
+  if (!old) return null;
+
+  const sets   = [];
+  const params = [];
+  let pi = 1;
+
+  const fieldMap = { driverKey: 'driver_key', mode: 'mode' };
+
+  for (const [k, col] of Object.entries(fieldMap)) {
+    if (data[k] !== undefined) {
+      sets.push(`${col} = $${pi++}${col==='mode'?'::device_mode':''}`);
+      params.push(data[k]);
+    }
+  }
+  if (!sets.length) return old;
+
+  sets.push('updated_at = NOW()');
+  params.push(id, institutionId);
+
   const { rows } = await db.query(
-    `UPDATE controllable_devices SET driver_key=$1, mode=$2, updated_at=NOW()
-     WHERE id=$3 AND institution_id=$4 RETURNING *`,
-    [data.driverKey, data.mode, id, institutionId]
+    `UPDATE controllable_devices SET ${sets.join(',')}
+     WHERE id = $${pi} AND institution_id = $${pi + 1} RETURNING *`,
+    params
   );
   const device = rows[0] || null;
   if (device) {
-    await audit({ userId, action:'UPDATE', resource:'controllable_devices', resourceId: id, newData: data, req });
+    await audit({ userId, action:'UPDATE', resource:'controllable_devices',
+      resourceId: id, oldData: old, newData: data, req });
   }
   return device;
 }
