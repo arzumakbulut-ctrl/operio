@@ -29,4 +29,20 @@ describe('checkDeviceAuthorization', () => {
     const r = checkDeviceAuthorization({ user: { roleId: 6 }, device: cauteryDevice, activeRoomId: 'room-1', teamRole: 'cerrah' });
     expect(r.allowed).toBe(true);
   });
+
+  it('aktif ameliyat yok (activeRoomId=null) + odasız cihaz (room_id=null) → reddedilmeli (null===null fail-open)', () => {
+    const roomlessLight = { room_id: null, device_group: 'light', capabilities: {} };
+    const r = checkDeviceAuthorization({ user: { roleId: 4 }, device: roomlessLight, activeRoomId: null, teamRole: 'hemsire' });
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toBe('room_mismatch');
+  });
+
+  it('device null → temiz red dönmeli, throw etmemeli', () => {
+    let r;
+    expect(() => {
+      r = checkDeviceAuthorization({ user: { roleId: 4 }, device: null, activeRoomId: 'room-1', teamRole: 'hemsire' });
+    }).not.toThrow();
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toBe('device_not_found');
+  });
 });

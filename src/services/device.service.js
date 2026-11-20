@@ -75,11 +75,17 @@ const ALLOWED_ROLE_IDS = [0, 1, 2, 3, 4, 5, 6];
 
 // Pure function: no DB / I/O. Caller pre-fetches user, device, active room and team role.
 function checkDeviceAuthorization({ user, device, activeRoomId, teamRole }) {
+  if (!device) {
+    return { allowed: false, reason: 'device_not_found' };
+  }
+
   if (!ALLOWED_ROLE_IDS.includes(user?.roleId)) {
     return { allowed: false, reason: 'role_not_allowed' };
   }
 
-  if (device.room_id !== activeRoomId) {
+  // activeRoomId == null means the caller is in no active surgery; never authorize that,
+  // even when the device has no room either (null === null must not pass).
+  if (activeRoomId == null || device.room_id !== activeRoomId) {
     return { allowed: false, reason: 'room_mismatch' };
   }
 
