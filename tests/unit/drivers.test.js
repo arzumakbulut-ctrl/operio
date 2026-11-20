@@ -11,6 +11,12 @@ describe('MockDriver', () => {
     expect(status.power_state).toBe('ON');
   });
 
+  it('turnOn power_level\'ı değiştirmemeli (0 iken 0 kalmalı)', async () => {
+    const d = new MockDriver({ id: 'd1', driver_key: 'mock', power_level: 0 });
+    const status = await d.turnOn();
+    expect(status).toEqual({ power_state: 'ON', power_level: 0 });
+  });
+
   it('turnOff → OFF, power_level 0 olmalı', async () => {
     const d = new MockDriver(device);
     const status = await d.turnOff();

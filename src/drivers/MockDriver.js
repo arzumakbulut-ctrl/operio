@@ -22,7 +22,6 @@ class MockDriver extends DeviceDriver {
 
   async turnOn() {
     this._power_state = 'ON';
-    if (this._power_level === 0) this._power_level = 100;
     return this._status();
   }
 
