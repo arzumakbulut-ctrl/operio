@@ -196,14 +196,25 @@ async function executeCommand({ deviceId, institutionId, userId, roleId, action,
 }
 
 // Thin, db-touching orchestration — not unit tested, see note on executeCommand above.
-// Deliberately does NOT re-run decideCommand/checkDeviceAuthorization: per the plan,
-// the only gate here is that the device must currently be ARMED (i.e. a prior,
-// already-authorized arm_move put it there).
+// Deliberately does NOT run the FULL decideCommand/checkDeviceAuthorization bar (no
+// requiredTeamRoles check): physicalConfirm models someone physically at the device
+// console confirming a move that an authorized arm_move already armed, and any team
+// member actually in that room can reasonably press the confirm button — not only
+// whoever issued the arm_move. It still must reject anyone with no connection to that
+// room at all, so it applies the same room-membership half of the check that
+// checkDeviceAuthorization uses (reusing getActiveAssignment, same as executeCommand),
+// plus the ARMED-state gate.
 async function physicalConfirm({ deviceId, institutionId, userId, req }) {
   const device = await getDevice({ id: deviceId, institutionId });
   if (!device) {
     throw new Error('device_not_found');
   }
+
+  const { activeRoomId } = await getActiveAssignment({ userId });
+  if (activeRoomId == null || device.room_id !== activeRoomId) {
+    throw new Error('room_mismatch');
+  }
+
   if (device.power_state !== 'ARMED') {
     throw new Error('not_armed');
   }
