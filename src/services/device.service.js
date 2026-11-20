@@ -71,4 +71,25 @@ async function updateDeviceConfig({ id, data, institutionId, userId, req }) {
   return device;
 }
 
-module.exports = { listDevices, getDevice, createDevice, updateDeviceConfig };
+const ALLOWED_ROLE_IDS = [0, 1, 2, 3, 4, 5, 6];
+
+// Pure function: no DB / I/O. Caller pre-fetches user, device, active room and team role.
+function checkDeviceAuthorization({ user, device, activeRoomId, teamRole }) {
+  if (!ALLOWED_ROLE_IDS.includes(user?.roleId)) {
+    return { allowed: false, reason: 'role_not_allowed' };
+  }
+
+  if (device.room_id !== activeRoomId) {
+    return { allowed: false, reason: 'room_mismatch' };
+  }
+
+  const requiredTeamRoles = device.capabilities?.requiredTeamRoles;
+  if (Array.isArray(requiredTeamRoles) && requiredTeamRoles.length > 0
+      && !requiredTeamRoles.includes(teamRole)) {
+    return { allowed: false, reason: 'team_role_required' };
+  }
+
+  return { allowed: true };
+}
+
+module.exports = { listDevices, getDevice, createDevice, updateDeviceConfig, checkDeviceAuthorization };
