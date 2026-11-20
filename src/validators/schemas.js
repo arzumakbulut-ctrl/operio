@@ -104,7 +104,7 @@ const notificationCreateSchema = z.object({
 // ── CİHAZ (Sesli Kontrol) ────────────────────────────────────
 const deviceCreateSchema = z.object({
   name:                    z.string().min(1).max(100),
-  deviceGroup:             z.enum(['light', 'table', 'electrosurgery']),
+  deviceGroup:             z.enum(['light', 'table', 'electrosurgery', 'endoscopy_imaging']),
   deviceType:              z.string().min(1).max(50),
   roomId:                  z.string().uuid().optional(),
   requiresPhysicalConfirm: z.boolean().optional(),
