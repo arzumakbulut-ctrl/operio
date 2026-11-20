@@ -1,0 +1,134 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, develop]
+    paths: ['operio-backend/**', '.github/workflows/backend.yml']
+  pull_request:
+    branches: [main, develop]
+    paths: ['operio-backend/**']
+
+defaults:
+  run:
+    working-directory: operio-backend
+
+jobs:
+  # ── BAĞIMLILIK DENETİMİ ─────────────────────────────────────
+  audit:
+    name: Güvenlik Denetimi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: operio-backend/package-lock.json
+
+      - run: npm ci
+
+      - name: NPM Güvenlik Denetimi
+        run: npm audit --audit-level=high
+        # moderate severity'leri şimdilik uyarı olarak al
+        continue-on-error: true
+
+      - name: Bağımlılık sürümlerini kontrol et
+        run: npm outdated || true
+
+  # ── LİNT ─────────────────────────────────────────────────────
+  lint:
+    name: Kod Kalitesi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: operio-backend/package-lock.json
+      - run: npm ci
+      - name: Sözdizimi kontrolü (Node.js)
+        run: node --check src/app.js src/server.js src/socket.js
+
+  # ── BİRİM + ENTEGRASYON + GÜVENLİK TESTLERİ ─────────────────
+  test:
+    name: Testler (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: ['20', '22']
+      fail-fast: false
+
+    env:
+      NODE_ENV:           test
+      JWT_ACCESS_SECRET:  ci-access-secret-minimum-32-chars-long!!
+      JWT_REFRESH_SECRET: ci-refresh-secret-minimum-32-chars-long!
+      DATABASE_URL:       postgresql://test:test@localhost/test_db
+      ANTHROPIC_API_KEY:  test-key
+      IYZICO_API_KEY:     test-key
+      IYZICO_SECRET_KEY:  test-secret
+      STRIPE_SECRET_KEY:  sk_test_placeholder
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: operio-backend/package-lock.json
+
+      - name: Bağımlılıkları yükle
+        run: npm ci
+
+      - name: Birim testleri
+        run: npm run test:unit -- --reporter=verbose
+
+      - name: Entegrasyon testleri
+        run: npm run test:integration -- --reporter=verbose
+
+      - name: Güvenlik testleri
+        run: npm run test:security -- --reporter=verbose
+
+      - name: Coverage raporu
+        if: matrix.node-version == '22'
+        run: npm run test:coverage
+
+      - name: Coverage yükle (Codecov)
+        if: matrix.node-version == '22'
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./operio-backend/coverage/lcov.info
+          flags: backend
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Test sonuçlarını yükle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results-node${{ matrix.node-version }}
+          path: |
+            operio-backend/coverage/
+          retention-days: 7
+
+  # ── PR YORUMU ─────────────────────────────────────────────────
+  coverage-comment:
+    name: Coverage PR Yorumu
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: backend-test-results-node22
+          path: coverage
+
+      - name: Coverage özeti PR'a yorum yap
+        uses: davelosert/vitest-coverage-report-action@v2
+        with:
+          working-directory: operio-backend
+          name: Backend Coverage

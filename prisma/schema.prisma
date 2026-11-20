@@ -1,0 +1,267 @@
+// Prisma schema - operio backend
+// Üretimde: npx prisma migrate dev
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── KULLANICILAR ────────────────────────────────
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  roleId       Int
+  institutionId String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  role         Role        @relation(fields: [roleId], references: [id])
+  institution  Institution? @relation(fields: [institutionId], references: [id])
+  refreshTokens RefreshToken[]
+  auditLogs    AuditLog[]
+  surgeries    SurgeryTeam[]
+
+  @@map("users")
+}
+
+model Role {
+  id          Int    @id @default(autoincrement())
+  name        String @unique
+  displayName String
+  permissions Json   @default("{}")
+  users       User[]
+
+  @@map("roles")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revoked   Boolean  @default(false)
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+// ── KURUM ────────────────────────────────
+model Institution {
+  id        String   @id @default(uuid())
+  name      String
+  type      String   @default("Devlet Hastanesi")
+  address   String?
+  phone     String?
+  email     String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  users     User[]
+  rooms     OperatingRoom[]
+  surgeries Surgery[]
+
+  @@map("institutions")
+}
+
+// ── AMELİYAT SALONLARI ────────────────────────────────
+model OperatingRoom {
+  id            String   @id @default(uuid())
+  institutionId String
+  name          String
+  roomNumber    Int
+  branch        String?
+  capacity      Int      @default(6)
+  status        RoomStatus @default(IDLE)
+  color         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  institution   Institution @relation(fields: [institutionId], references: [id])
+  surgeries     Surgery[]
+
+  @@map("operating_rooms")
+}
+
+enum RoomStatus {
+  ACTIVE
+  IDLE
+  RESERVED
+  MAINTENANCE
+  CLOSED
+}
+
+// ── HASTALAR ────────────────────────────────
+model Patient {
+  id          String   @id @default(uuid())
+  tcNo        String?  @unique
+  firstName   String
+  lastName    String
+  dateOfBirth DateTime?
+  gender      String?
+  bloodType   String?
+  phone       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  surgeries   Surgery[]
+
+  @@map("patients")
+}
+
+// ── AMELİYATLAR ────────────────────────────────
+model Surgery {
+  id            String        @id @default(uuid())
+  institutionId String
+  roomId        String?
+  patientId     String?
+  title         String
+  branch        String?
+  surgeonName   String?
+  scheduledStart DateTime
+  scheduledEnd   DateTime?
+  durationMin    Int?
+  status        SurgeryStatus @default(WAITING)
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  institution   Institution    @relation(fields: [institutionId], references: [id])
+  room          OperatingRoom? @relation(fields: [roomId], references: [id])
+  patient       Patient?       @relation(fields: [patientId], references: [id])
+  team          SurgeryTeam[]
+  sterileSets   SurgerySterilSet[]
+  auditLogs     AuditLog[]
+
+  @@map("surgeries")
+}
+
+enum SurgeryStatus {
+  WAITING
+  PREPARING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  POSTPONED
+}
+
+model SurgeryTeam {
+  id        String @id @default(uuid())
+  surgeryId String
+  userId    String
+  teamRole  String // cerrah | scrub | anestezi | sirkule
+
+  surgery   Surgery @relation(fields: [surgeryId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id])
+
+  @@unique([surgeryId, userId])
+  @@map("surgery_teams")
+}
+
+// ── STERİL SETLER ────────────────────────────────
+model SterileSet {
+  id             String      @id @default(uuid())
+  code           String      @unique
+  name           String
+  totalCount     Int         @default(1)
+  sterileCount   Int         @default(0)
+  inUseCount     Int         @default(0)
+  shelfLocation  String?
+  lastSterilized DateTime?
+  status         SetStatus   @default(STERILE)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  instruments    SetInstrument[]
+  surgeries      SurgerySterilSet[]
+  trackingLogs   SetTrackingLog[]
+
+  @@map("sterile_sets")
+}
+
+enum SetStatus {
+  STERILE
+  IN_USE
+  STERILIZING
+  FAULTY
+  RETIRED
+}
+
+model SetInstrument {
+  id           String     @id @default(uuid())
+  setId        String
+  name         String
+  expectedCount Int       @default(1)
+  currentCount  Int       @default(1)
+
+  set          SterileSet @relation(fields: [setId], references: [id], onDelete: Cascade)
+
+  @@map("set_instruments")
+}
+
+model SurgerySterilSet {
+  id        String @id @default(uuid())
+  surgeryId String
+  setId     String
+
+  surgery   Surgery    @relation(fields: [surgeryId], references: [id], onDelete: Cascade)
+  set       SterileSet @relation(fields: [setId], references: [id])
+
+  @@unique([surgeryId, setId])
+  @@map("surgery_sterile_sets")
+}
+
+model SetTrackingLog {
+  id        String   @id @default(uuid())
+  setId     String
+  stage     String   // teslim_alindi | yikama | sterilizasyon | steril | depo
+  operator  String?
+  notes     String?
+  createdAt DateTime @default(now())
+
+  set       SterileSet @relation(fields: [setId], references: [id], onDelete: Cascade)
+
+  @@map("set_tracking_logs")
+}
+
+// ── DENETİM GÜNLÜĞÜ ────────────────────────────────
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  action     String   // CREATE | UPDATE | DELETE | LOGIN | LOGOUT
+  resource   String   // surgery | patient | user | room …
+  resourceId String?
+  surgeryId  String?
+  oldData    Json?
+  newData    Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  user       User?    @relation(fields: [userId], references: [id])
+  surgery    Surgery? @relation(fields: [surgeryId], references: [id])
+
+  @@map("audit_logs")
+}
+
+// ── BİLDİRİMLER ────────────────────────────────
+model Notification {
+  id         String   @id @default(uuid())
+  targetRole Int?     // null = tüm roller
+  targetUserId String?
+  type       String   // uyari | tamamlandi | katilim | sistem
+  title      String
+  message    String
+  isRead     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@map("notifications")
+}
