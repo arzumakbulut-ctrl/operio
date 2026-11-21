@@ -11,6 +11,7 @@ const db = require('../utils/db');
 const SPOTIFY_AUTHORIZE_URL = 'https://accounts.spotify.com/authorize';
 const SPOTIFY_TOKEN_URL     = 'https://accounts.spotify.com/api/token';
 const SPOTIFY_ME_URL        = 'https://api.spotify.com/v1/me';
+const SPOTIFY_SEARCH_URL    = 'https://api.spotify.com/v1/search';
 
 // Sonraki görevlerin (çalma/duraklatma) ihtiyaç duyacağı iki izin.
 const SCOPE = 'user-read-playback-state user-modify-playback-state';
@@ -210,6 +211,48 @@ async function refreshAccessTokenIfNeeded(userId) {
 }
 
 /**
+ * searchTrackOrPlaylist — kiosk'un SPOTIFY_PLAY dalı (kiosk.routes.js) için
+ * verilen sorguyu Spotify'da arar. GERÇEK bir Spotify Web API çağrısıdır —
+ * ama SADECE arama/resolve içindir. TASARIM KARARI (plandan): gerçek play/
+ * transfer-playback endpoint'i bu fazda HİÇ çağrılmaz; burada bulunan
+ * {name, uri} sonucu çağıran tarafça (kiosk.routes.js) doğrudan mock
+ * sürücüye (MockSpotifyPlaybackDriver) geçirilir, gerçek çalma asla
+ * tetiklenmez.
+ *
+ * type=track,playlist&limit=1 ile AYNI çağrıda hem track hem playlist sonucu
+ * istenir (en fazla birer adet). İkisi de doluysa TRACK ÖNCELİKLİDİR — sesli
+ * komutun tipik kullanımı "X şarkısını çalsın" gibi tek bir parça istemektir;
+ * kullanıcı bir liste istediğinde ("X listesini çalsın") zaten tracks tarafı
+ * genelde boş döner, bu da playlist'in doğal olarak seçilmesini sağlar.
+ *
+ * @param {string} accessToken
+ * @param {string} query
+ * @returns {Promise<{ name: string, uri: string } | null>}
+ */
+async function searchTrackOrPlaylist(accessToken, query) {
+  const url = `${SPOTIFY_SEARCH_URL}?q=${encodeURIComponent(query)}&type=track,playlist&limit=1`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Spotify arama başarısız: HTTP ${res.status}`);
+  }
+  const data = await res.json();
+
+  const track = data.tracks && data.tracks.items && data.tracks.items[0];
+  if (track) {
+    return { name: track.name, uri: track.uri };
+  }
+
+  const playlist = data.playlists && data.playlists.items && data.playlists.items[0];
+  if (playlist) {
+    return { name: playlist.name, uri: playlist.uri };
+  }
+
+  return null;
+}
+
+/**
  * disconnect — kullanıcının Spotify bağlantısını kaldırır.
  * @param {string} userId
  */
@@ -224,5 +267,6 @@ module.exports = {
   saveConnection,
   getConnection,
   refreshAccessTokenIfNeeded,
+  searchTrackOrPlaylist,
   disconnect,
 };

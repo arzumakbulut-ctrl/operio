@@ -7,12 +7,20 @@ const { parseIntent } = require('../utils/kioskIntent');
 const { ok, serverError } = require('../utils/response');
 const { handleCommandError } = require('../utils/deviceCommandErrors');
 const { createPendingConfirmation, resolvePendingConfirmation } = require('../services/kioskConfirmation.service');
+const { MockSpotifyPlaybackDriver } = require('../drivers/MockSpotifyPlaybackDriver');
 
 // Servis varsayılan olarak gerçek implementasyonu kullanır
 // Test ortamında mock inject edilebilir (device.routes.js'teki desenle aynı)
 const registry = require('../services/_registry');
-const getKioskService  = () => registry.get('kiosk', () => require('../services/kiosk.service'));
-const getDeviceService = () => registry.get('device', () => require('../services/device.service'));
+const getKioskService   = () => registry.get('kiosk', () => require('../services/kiosk.service'));
+const getDeviceService  = () => registry.get('device', () => require('../services/device.service'));
+const getSpotifyService = () => registry.get('spotify', () => require('../services/spotify.service'));
+// Spotify çalma sürücüsü de (device.service ile aynı sebeple) registry üzerinden alınır —
+// kioskSpeakerAuth'un getSpeakerVerifier()'ı (registry'siz, sabit factory) buna UYGUN
+// DEĞİLDİR, çünkü MockSpeakerVerifier.identify() yan etkisizdir ama MockSpotifyPlaybackDriver.
+// play() KENDİ İÇİNDE audit() çağırır (gerçek DB'ye yazar) — entegrasyon testlerinin bunu
+// enjekte edebilmesi gerekir (bkz. kioskVoiceCommand.spotify.test.js).
+const getSpotifyPlaybackDriver = () => registry.get('spotifyPlaybackDriver', () => new MockSpotifyPlaybackDriver());
 
 // parseIntent'in DEVICE_COMMAND için döndürdüğü Türkçe anahtar kelime (koter/ligasure/
 // ışık/lamba/masa — bkz. kioskIntent.js DEVICE_GROUPS), device.service/DB'nin device_group
@@ -54,6 +62,28 @@ function deriveAction(deviceGroup, transcript, value) {
   return null;
 }
 
+/**
+ * extractSpotifyQuery — SPOTIFY_PLAY transcript'inden arama sorgusunu çıkarır.
+ * parseIntent SPOTIFY_PLAY için params.query DÖNDÜRMEZ (sadece "spotify" geçtiğini
+ * tespit eder, bkz. kioskIntent.js) — bu basit ikinci-aşama ayrıştırma, "spotify"
+ * kelimesinden SONRA kalan her şeyi sorgu olarak alır.
+ *
+ * "spotify" kelimesinin hemen ardına kesme işaretiyle bitişik gelen bir Türkçe hal
+ * eki varsa (örn. "spotify'da", "spotify'dan") bu ek atılır; ardından baştaki/
+ * sondaki noktalama ve boşluklar kırpılır. Kasıtlı olarak basit tutulmuştur — tam
+ * dil bilgisi ayrıştırması bu task'ın kapsamı dışındadır (bkz. task brief).
+ */
+function extractSpotifyQuery(transcript) {
+  const text = transcript ?? '';
+  const idx = text.toLowerCase().indexOf('spotify');
+  if (idx === -1) return '';
+
+  let rest = text.slice(idx + 'spotify'.length);
+  rest = rest.replace(/^'\p{L}*/u, ''); // "'da"/"'de"/"'dan"/"'den" vb. bitişik ek
+  rest = rest.trim().replace(/^[-:,.'"]+\s*/, '').replace(/\s*[-:,.'"]+$/, '');
+  return rest.trim();
+}
+
 // SKS (Sağlıkta Kalite Standartları) Time-Out checklist, madde 16-17 — sabit metin.
 const TIMEOUT_SENTENCES = [
   'Ekipteki kişiler kendilerini ad, soyad ve görevleri ile tanıttı mı?',
@@ -78,8 +108,17 @@ const UNKNOWN_RESPONSE = { type: 'UNKNOWN', say: 'Anlayamadım, tekrar söyler m
  *   varsa çözülür ve device.service.executeCommand() çağrılır (kendi audit()'ini kendi
  *   yazar). Bu ikinci çağrı da kioskRoomAuth'tan GEÇER — ameliyat artık IN_PROGRESS
  *   değilse bekleyen onaya hiç bakılmadan 409 döner (Review Focus #2).
- * - SPOTIFY_PLAY / WEB_SEARCH: Task 9/10'da eklenecek — bu dallar kasıtlı olarak boş/TODO
- *   bırakıldı, şimdilik ortak UNKNOWN fallback'ine düşer.
+ * - SPOTIFY_PLAY (Task 9): DEVICE_COMMAND gibi kioskSpeakerAuth'tan manuel geçer, AMA
+ *   DEVICE_COMMAND'ın aksine TEK adımda sonuçlanır — sesli onay döngüsüne (confirmationPhrase/
+ *   createPendingConfirmation) HİÇ girmez. Sırasıyla: transcript'ten sorgu çıkarılır
+ *   (extractSpotifyQuery) → spotify.service.refreshAccessTokenIfNeeded ile access token
+ *   alınır (bağlantı yoksa 404 fırlatır — bu durumda kullanıcıya özel bir "bağlı değil"
+ *   mesajı dönülür, jenerik bir hata DEĞİL) → spotify.service.searchTrackOrPlaylist ile
+ *   GERÇEK bir Spotify arama çağrısı yapılır (sadece arama/resolve — plandaki tasarım
+ *   kararı: gerçek play/transfer-playback endpoint'i bu fazda hiç çağrılmaz) → bulunan
+ *   track/playlist MockSpotifyPlaybackDriver'a (ağ çağrısı yapmaz, audit() yazar) geçirilir.
+ * - WEB_SEARCH: Task 10'da eklenecek — bu dal kasıtlı olarak boş/TODO bırakıldı, şimdilik
+ *   ortak UNKNOWN fallback'ine düşer.
  * - UNKNOWN (veya transcript < 3 karakter — bkz. parseIntent): sabit "Anlayamadım" yanıtı.
  */
 router.post(
@@ -179,7 +218,45 @@ router.post(
       }
 
       if (intent.type === 'SPOTIFY_PLAY') {
-        // TODO(Task 9): kioskSpeakerAuth + spotify.service çağrısı buraya eklenecek.
+        // Aynı manuel kioskSpeakerAuth çağırma deseni (DEVICE_COMMAND dalındaki yorum, Task 7,
+        // bkz. yukarı) — ama bu dal TEK adımda sonuçlanır, sesli onay döngüsüne hiç girmez.
+        let speakerAuthErr = null;
+        await kioskSpeakerAuth(req, res, (err) => { speakerAuthErr = err; });
+        if (speakerAuthErr) throw speakerAuthErr;
+        if (res.headersSent) return;
+
+        const query = extractSpotifyQuery(req.body.transcript);
+        if (!query) {
+          return ok(res, { type: 'SPOTIFY_PLAY', say: 'Ne çalmamı istediğinizi anlayamadım.' });
+        }
+
+        let accessToken;
+        try {
+          accessToken = await getSpotifyService().refreshAccessTokenIfNeeded(req.speaker.userId);
+        } catch (err) {
+          if (err.statusCode === 404) {
+            // Beklenen, kullanıcıya özel bir durum (hesap bağlı değil) — sunucu hatası DEĞİL,
+            // bu yüzden normal bir 200 yanıtı (bkz. Review Focus #4).
+            return ok(res, {
+              type: 'SPOTIFY_PLAY',
+              say: 'Spotify hesabınız bağlı değil, Profil sayfasından bağlayabilirsiniz.',
+            });
+          }
+          throw err;
+        }
+
+        const result = await getSpotifyService().searchTrackOrPlaylist(accessToken, query);
+        if (!result) {
+          return ok(res, { type: 'SPOTIFY_PLAY', say: 'Bu isimde bir şarkı veya liste bulamadım.' });
+        }
+
+        const driverResult = await getSpotifyPlaybackDriver().play({
+          userName:  req.speaker.fullName,
+          trackName: result.name,
+          roomId:    req.kiosk.roomId,
+          req,
+        });
+        return ok(res, { type: 'SPOTIFY_PLAY', say: driverResult.message });
       }
 
       if (intent.type === 'WEB_SEARCH') {

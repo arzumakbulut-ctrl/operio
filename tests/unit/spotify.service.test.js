@@ -260,6 +260,72 @@ describe('saveConnection (sahte db modülü — gerçek upsert SQL çalıştır�
   });
 });
 
+describe('searchTrackOrPlaylist (fetch vi.stubGlobal — GERÇEK tek bir /v1/search çağrısı; play/transfer-playback\'e bu fonksiyon içinden ASLA gidilmez)', () => {
+  it('q/type=track,playlist/limit=1 parametreleriyle ve Bearer header\'ıyla GET /v1/search çağırır; track VE playlist sonucu varsa TRACK\'i döner (tasarım kararı: track önceliklidir)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        tracks:    { items: [{ name: 'Bohemian Rhapsody', uri: 'spotify:track:abc' }] },
+        playlists: { items: [{ name: 'Classic Rock', uri: 'spotify:playlist:xyz' }] },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { searchTrackOrPlaylist } = requireFreshService();
+    const result = await searchTrackOrPlaylist('token-abc', 'bohemian rhapsody');
+
+    expect(result).toEqual({ name: 'Bohemian Rhapsody', uri: 'spotify:track:abc' });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const [calledUrl, calledOptions] = fetchMock.mock.calls[0];
+    expect(calledUrl).toContain('https://api.spotify.com/v1/search?');
+    expect(calledUrl).toContain('type=track,playlist');
+    expect(calledUrl).toContain('limit=1');
+    expect(calledUrl).toContain(encodeURIComponent('bohemian rhapsody'));
+    expect(calledOptions.headers.Authorization).toBe('Bearer token-abc');
+
+    // Review Focus: gerçek play/transfer-playback endpoint'ine bu fonksiyon İÇİNDE ASLA gidilmez.
+    expect(calledUrl).not.toContain('/play');
+    expect(calledUrl).not.toContain('/transfer-playback');
+  });
+
+  it('track sonucu boşsa ama playlist sonucu varsa playlist\'i döner', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        tracks:    { items: [] },
+        playlists: { items: [{ name: 'Seksenler Hits', uri: 'spotify:playlist:xyz' }] },
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { searchTrackOrPlaylist } = requireFreshService();
+    const result = await searchTrackOrPlaylist('token-abc', 'seksenler');
+
+    expect(result).toEqual({ name: 'Seksenler Hits', uri: 'spotify:playlist:xyz' });
+  });
+
+  it('hem track hem playlist sonucu boşsa null döner', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ tracks: { items: [] }, playlists: { items: [] } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { searchTrackOrPlaylist } = requireFreshService();
+    const result = await searchTrackOrPlaylist('token-abc', 'tamamen anlamsız bir şey');
+
+    expect(result).toBeNull();
+  });
+
+  it('Spotify arama endpoint\'i hata dönerse (ok:false) fırlatır', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 401 }));
+
+    const { searchTrackOrPlaylist } = requireFreshService();
+    await expect(searchTrackOrPlaylist('expired-token', 'query')).rejects.toThrow();
+  });
+});
+
 describe('disconnect', () => {
   it('kullanıcının bağlantısını DB\'den siler (DELETE ... WHERE user_id)', async () => {
     const fakeDb = { query: vi.fn().mockResolvedValue({ rows: [], rowCount: 1 }) };
