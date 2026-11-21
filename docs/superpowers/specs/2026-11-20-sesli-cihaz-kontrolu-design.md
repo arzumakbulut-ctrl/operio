@@ -1,6 +1,6 @@
 # Operio Voice — Ameliyathane Sesli Cihaz Kontrol Modülü
 
-**Durum:** Revize edildi — standalone ürün değil, mevcut Operio uygulamasının bir modülü olarak kararlaştırıldı.
+**Durum:** Revize edildi — standalone ürün değil, mevcut Operio uygulamasının bir modülü olarak kararlaştırıldı. **2026-11-21 güncellemesi:** Kapsam, mevcut **"Operia"** asistan kimliği (bkz. `src/services/ai.service.js`, sidebar sohbet paneli) altında Spotify kontrolü ve web arama (kritik olmayan, rol kısıtı olmayan komutlar) içerecek şekilde genişletildi — yeni bir marka icat edilmedi, Operia sesli hale genişletildi. Bkz. "Operia — Genişletilmiş Kapsam" bölümü.
 
 ## Amaç ve neden
 
@@ -238,6 +238,82 @@ Sağlık Bakanlığı'nın resmi "Tıp Merkezi Güvenli Cerrahi Kontrol Listesi"
 - Tetikleme: Kiosk ekranında "Operio, time-out" (veya benzer sabit bir tetik ifadesi) duyulunca, kiosk `speechSynthesis` ile sırayla iki maddeyi okur.
 - Kayıt: Ne zaman okunduğu `audit_logs`'a yazılır (`action='voice:timeout_read'`, `resource='surgeries'`, `resource_id=<ameliyat id>`) — uyum/kanıt amaçlı, ekstra bir tablo açılmadan.
 - Yeni tablo yok, yeni yetkilendirme katmanı yok — mevcut Kiosk sayfasına ikinci, hafif bir komut niyeti olarak eklenir.
+
+## Operia — Genişletilmiş Kapsam (2026-11-21 eklendi)
+
+Bu bölüm, önceki bölümlerin karar verdiği mimariyi (kiosk + ses biyometrisi + katmanlı yetkilendirme) **değiştirmiyor**, üzerine iki yeni "kritik olmayan" komut sınıfı ekliyor: Spotify kontrolü ve web arama. Aşağıdaki her şey, yukarıdaki "Karar verilen tasarım" bölümünün bir uzantısıdır.
+
+### Marka/UI birleşmesi
+
+**Netleştirildi (önemli keşif, builder-check'ten önce bulundu):** Projede zaten `src/services/ai.service.js` + `AIPanel.jsx`/`useAIChat.js` ile çalışan, Claude API tabanlı, **"Operia"** adında bir metin-sohbet asistanı var (sidebar paneli, kurum verisiyle sohbet, aksiyon üretme). "Operio Voice" ve (ileride) "Operio Vision" **yeni bir marka icat etmiyor** — hepsi **Operia** kimliğinin bir uzantısı: Operia artık hem yazılı panelden hem kiosk'tan **sesle** erişilebiliyor.
+
+- **Uyandırma kelimesi değişmiyor:** Kiosk'ta tetikleyici kelime hâlâ **"Operio"** (ör. "Operio, koteri 20 yap"). Ama asistan kendi kimliğinden bahsederken/cevap verirken kendini **"Operia"** olarak tanıtır (ör. "Operia bunu buldu: ...", "Ayşe'nin Spotify hesabını açıyorum" gibi kişiye özel yanıtlarda da konuşan taraf Operia'dır).
+- **Web arama, yeni bir entegrasyon kurmaz** — mevcut `ai.service.js`'teki Claude istemcisi (`client`, `MODEL`, `ANTHROPIC_API_KEY` zaten tanımlı ve kullanımda) kullanılır, sadece `web_search` aracı eklenmiş yeni bir fonksiyon bu dosyaya eklenir. Aşağıdaki "Web arama entegrasyonu" bölümü bu şekilde güncellendi.
+- `modules` tablosundaki `slug` değerleri değişmiyor (`voice_control`, ileride `vision_counting`) — satın alma/entitlement hâlâ ayrı ayrı, kurum birini alıp diğerini almayabilir.
+- Spotify ve web arama **yeni bir satın alınabilir modül değil** — `voice_control` modülünün kapsamına dahil (aynı `requireModule('voice_control')` kapısından geçer).
+
+### Yetkilendirme modeli — üçüncü kademe (yeni kavram yok, var olan mekanizma genişletiliyor)
+
+Mevcut `capabilities.requiredTeamRoles` alanı zaten "boşsa ek kısıtlama yok" anlamına geliyordu. Spotify/web-arama bu boş-kısıtlama durumunu kullanır — veri modelinde hiçbir değişiklik gerekmez:
+
+| Komut sınıfı | Taban kapı (ekip+oda+ses-biyometri) | Ek rol kısıtı |
+|---|---|---|
+| Elektrocerrahi / masa | zorunlu | `cerrah` |
+| Işık / endoskopi | zorunlu | yok |
+| **Spotify / web arama** | zorunlu | yok |
+
+Yani kişi o ameliyat ekibinde olmalı (rolü ne olursa olsun) ama `cerrah` olması gerekmiyor — tıpkı ışık/endoskopi gibi.
+
+**Netleştirildi (builder-check sordu, karar verildi):** "Taban kapı" harfiyen aynı — Spotify/web-arama da, cihaz komutları gibi, o odada **IN_PROGRESS bir ameliyat olmasını** şart koşar. Ameliyat yoksa kiosk hiçbir sesli komutu (Spotify/arama dahil) kabul etmez; `SpeakerVerifier.identify()`'ın aday havuzu hep "o anki ameliyat ekibi" olarak kalır, ikinci bir aday-havuzu kaynağı (günlük personel listesi vb.) eklenmiyor. Bilinçli tercih: basitlik, tek bir yetkilendirme yolu, ek bir kiosk ekran-durumu icat edilmiyor.
+
+### Kanal kararı (tartışıldı, vazgeçildi)
+
+Kişisel telefon/cihaz üzerinden ayrı bir giriş kanalı değerlendirildi ve **vazgeçildi**: Spotify/web-arama da dahil her komut, kiosk mikrofonu + ses-biyometri doğrulamasından geçer. Sebep: hangi Spotify hesabının açılacağını / kime hitaben cevap verileceğini belirlemek zaten bir kimlik tespiti gerektiriyor, bu da mevcut `SpeakerVerifier` akışının ta kendisi — ayrı bir kanal (telefon login) bu ihtiyacı ortadan kaldırmıyor, sadece yetkilendirmeyi iki yere bölüyordu.
+
+### Spotify entegrasyonu
+
+**Yeni tablo** (`migrations/001_init.sql`'e eklenir):
+
+```sql
+CREATE TABLE IF NOT EXISTS user_spotify_connections (
+  id                UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id           UUID        NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  spotify_user_id   VARCHAR(100) NOT NULL,
+  access_token      TEXT        NOT NULL,
+  refresh_token     TEXT        NOT NULL,
+  expires_at        TIMESTAMPTZ NOT NULL,
+  connected_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+- **Bağlantı (gerçek, donanıma bağlı değil):** `Profil.jsx`'e "Spotify Hesabı" bölümü eklenir — standart OAuth Authorization Code flow. `GET/POST /api/spotify/connect`, `/callback`, `/disconnect` + token yenileme mantığı. Spotify Developer App kaydı/`client_id`/`client_secret` gerekir (builder'a bırakılıyor).
+- **Çalma hedefi (mock, donanım yok):** Aynı `DeviceDriver` ailesine yeni bir sürücü — `src/drivers/SpotifyPlaybackDriver.js` (gerçek: Spotify Connect "transfer playback" API'si ile o odanın kayıtlı Connect cihazına gönderir) ve varsayılan `MockSpotifyPlaybackDriver` (ses çıkmaz; `audit_logs`'a `action='voice:spotify_play'` ile "{isim}'in Spotify hesabından {X} çalınıyor (mock, oda: {Y})" yazılır, kiosk ekranında metinle gösterilir).
+- **Komut akışı (netleştirildi — builder-check buldu):** ses-biyometri kişiyi tanır → taban yetki kontrolü (ekip+oda) → `user_spotify_connections`'da kaydı var mı kontrol edilir (yoksa: "Spotify hesabınız bağlı değil, Profil sayfasından bağlayabilirsiniz" sesli yanıtı) → varsa, o kullanıcının gerçek token'ıyla Spotify Web API'ye **sadece arama/resolve** isteği yapılır (track/playlist URI bulma) — Spotify'ın gerçek `play`/`transfer-playback` uç noktası bu fazda **hiç çağrılmaz** (zaten bağlı bir Connect cihazı olmadan hata verir). Bulunan track/playlist bilgisi `SpotifyPlaybackDriver`'a (şu an mock) iletilir → kiosk sesle onaylar: "**{isim}**'in Spotify hesabından **{playlist/şarkı}** çalınıyor (mock)."
+- Oynatma hedefinin (hangi "cihaz" kaydı olacağı) `controllable_devices` tablosuna mı ekleneceği yoksa ayrı mı tutulacağı builder'a bırakılıyor — ikisi de mevcut mimariyi bozmuyor.
+- **Not (builder-check buldu, karar verildi):** Spotify'ın gerçek oynatma kontrolü (play/transfer-playback) sadece Premium hesaplarda çalışır. Kişi-başı OAuth modeli (kurumsal/paylaşılan tek hesap değil) bilinçli olarak korunuyor — bu faz zaten gerçek `play` çağrısı yapmadığı için (yukarıdaki netleştirmeye bkz.) şimdilik engel değil; gerçek sürücü yazıldığında Premium olmayan hesaplar için anlaşılır bir sesli hata ("Bu özelliği kullanmak için Spotify Premium gerekiyor") döndürülmesi builder'a not olarak bırakılıyor.
+
+### Web arama entegrasyonu
+
+- **Yeni entegrasyon kurulmuyor — mevcut Operia altyapısı genişletiliyor:** `src/services/ai.service.js`'teki hazır Claude istemcisi (`client`, `MODEL`, `ANTHROPIC_API_KEY` zaten var) kullanılır. Bu dosyaya `webSearch(query)` adında yeni bir fonksiyon eklenir — `client.messages.create` çağrısına Claude'un yerleşik `web_search` aracı eklenmiş hali, ayrı bir arama API'si (Google/Bing/Brave) veya ayrı bir özetleme adımı kurulmaz.
+- **Akış:** kiosk "Operio, ara: ..." → backend `POST /api/assistant/web-search` (kiosk token + ses-biyometri + taban yetki kontrolünden geçer, rol kısıtı yok) → `aiService.webSearch(query)` çağrılır → dönen kısa cevap TTS ile okunur, "Operia" kimliğiyle sunulur. Ham arama sonucu/kaynak metni saklanmaz; sadece soru + özet cevap `audit_logs`'a (`action='voice:web_search'`) yazılır.
+- **İçerik kapsamı tamamen açık** — klinik (ilaç dozu, protokol) veya gündelik (spor skoru, hava durumu, genel merak) her türlü soru kapsamda; bir engelleme/konu filtresi **yazılmayacak** (bilinçli anti-hedef, aşağıda).
+- **Klinik-görünümlü sorularda ek sesli uyarı:** Cevap klinik bir soruya benziyorsa (yöntemi builder'a bırakılıyor — basit anahtar kelime listesi veya ikinci bir sınıflandırma çağrısı), cevaptan önce kısa bir uyarı eklenir: "Bu doğrulanmış bir klinik kaynak değildir." Gündelik sorularda bu uyarı eklenmez. Bu bir içerik kısıtlaması değildir, sadece bir sorumluluk notudur — cevap yine verilir.
+- **Veri çıkışı (builder-check sordu, karar verildi):** Kullanıcının sorduğu soru metni, cevap üretmek için Anthropic'in Claude API'sine (kurum dışı, üçüncü taraf bir servis) gönderilir. Bu, dokümanın ses biyometrisi için benimsediği "hastane verisi dışarı çıkmasın" ilkesinden **bilinçli olarak muaf** tutuluyor — bu faz zaten demo/prototip (bkz. dokümanın en başındaki regülasyon notu), gerçek hasta kullanımına geçilmeden önce bu karar yeniden değerlendirilecek. Sorgu metninde hasta-tanımlayıcı bilgi geçebileceği bilinen bir sınırlama olarak not ediliyor; filtre/redaksiyon bu fazda eklenmiyor.
+
+### Hedef olmayanlar (ek)
+
+- Kişisel telefon/cihaz üzerinden ayrı bir sesli komut kanalı (tartışıldı, vazgeçildi).
+- Web aramasının konuya/içeriğe göre kısıtlanması veya onaylı-kaynak listesiyle sınırlanması (tartışıldı, reddedildi — kullanıcının tercihine bırakıldı).
+- Spotify için gerçek ses çıkışı (oda hoparlörü/Spotify Connect cihazı donanımı henüz yok) — bu faz sadece mock.
+
+## Builder'a bırakılanlar (ek — Operia genişletmesi)
+
+- Spotify Developer App kaydı/client credentials temin süreci.
+- Oynatma hedefinin veri modeli: `controllable_devices`'a mı eklensin yoksa ayrı mı tutulsun.
+- Web arama için klinik-soru sınıflandırma yöntemi ve uyarı cümlesinin kesin metni.
+- Claude API model seçimi (maliyet/hız/kalite dengesi — basit sorular için düşük maliyetli bir model, karmaşık sorularda yükseltme ihtiyacı olup olmadığı).
+- Türkçe komut grameri: "Operio, Spotify'da X çal", "Operio, ara: Y" gibi ifadelerin eş anlamlı varyasyonları (mevcut Türkçe komut grameri görevine ek).
+- Spotify arama sonucu birden fazla eşleşme döndürürse (örn. "seksenler" adında birden fazla playlist) hangisinin seçileceği.
 
 ## Builder'a bırakılanlar
 
