@@ -19,4 +19,18 @@ function getDriver(device) {
   return new Klass(device);
 }
 
-module.exports = { getDriver, DRIVERS };
+/**
+ * isRealDriverKey(driverKey) — true sadece driverKey, DRIVERS'ta kayıtlı ve 'mock'
+ * olmayan gerçek bir sürücüye karşılık geliyorsa. 'mock' DRIVERS'ta bir anahtar olsa
+ * da (MockDriver'a eşlenir) kasıtlı olarak "gerçek" sayılmaz — bu fonksiyon,
+ * device.service.js'in mode='REAL' geçişini kapıda tutması için var: REAL mod asla
+ * mock sürücüyle veya kayıtsız bir anahtarla etkin olamaz. getDriver'ın kullandığı
+ * aynı hasOwnProperty mekanizmasını kullanır (prototip anahtarlarına karşı güvenli).
+ */
+function isRealDriverKey(driverKey) {
+  return driverKey !== 'mock'
+    && typeof driverKey === 'string'
+    && Object.prototype.hasOwnProperty.call(DRIVERS, driverKey);
+}
+
+module.exports = { getDriver, DRIVERS, isRealDriverKey };

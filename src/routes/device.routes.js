@@ -3,7 +3,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { requireModule } = require('../middleware/requireModule');
 const { validate } = require('../middleware/validate');
 const { deviceCreateSchema, deviceCommandSchema, deviceConfigSchema } = require('../validators/schemas');
-const { ok, created, notFound, forbidden, serverError } = require('../utils/response');
+const { ok, created, notFound, forbidden, badRequest, serverError } = require('../utils/response');
 
 // Servis varsayılan olarak gerçek implementasyonu kullanır
 // Test ortamında mock inject edilebilir (surgery.routes.js'teki desenle aynı)
@@ -72,7 +72,12 @@ router.patch('/:id/config', authorize(0, 11, 12), validate(deviceConfigSchema), 
     });
     if (!device) return notFound(res, 'Cihaz');
     return ok(res, device);
-  } catch (err) { return serverError(res, err); }
+  } catch (err) {
+    // updateDeviceConfig throws a statusCode:400 error when mode='REAL' is requested
+    // without a real, registered driverKey (see device.service.js).
+    if (err.statusCode === 400) return badRequest(res, err.message);
+    return serverError(res, err);
+  }
 });
 
 // Asıl yetkilendirme executeCommand içinde yapılır (roleId + aktif oda/ekip rolü).

@@ -1,7 +1,7 @@
 const db = require('../utils/db');
 const { audit } = require('../utils/audit');
 const { emitToInstitution, EVENTS } = require('../socket');
-const { getDriver } = require('../drivers/registry');
+const { getDriver, isRealDriverKey } = require('../drivers/registry');
 
 async function listDevices({ institutionId, roomId }) {
   const { rows } = await db.query(
@@ -61,6 +61,18 @@ async function createDevice({ data, institutionId, userId, req }) {
 async function updateDeviceConfig({ id, data, institutionId, userId, req }) {
   const old = await getDevice({ id, institutionId });
   if (!old) return null;
+
+  // mode='REAL' may only be set alongside (or on top of) a genuinely registered,
+  // non-mock driverKey — never a mock/unknown one. Uses whichever driverKey is in
+  // effect after this update: the one being set now, or the device's existing one.
+  const effectiveMode = data.mode !== undefined ? data.mode : old.mode;
+  const effectiveDriverKey = data.driverKey !== undefined ? data.driverKey : old.driver_key;
+  if (effectiveMode === 'REAL' && !isRealDriverKey(effectiveDriverKey)) {
+    throw Object.assign(
+      new Error("mode='REAL' için geçerli, kayıtlı bir gerçek sürücü (driverKey) gerekli — mock veya tanımsız bir sürücüyle REAL moda geçilemez"),
+      { statusCode: 400 }
+    );
+  }
 
   const sets   = [];
   const params = [];
