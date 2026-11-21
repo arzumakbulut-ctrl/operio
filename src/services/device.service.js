@@ -20,10 +20,28 @@ async function getDevice({ id, institutionId }) {
   return rows[0] || null;
 }
 
+// Pure function: no DB / I/O. High-risk device groups (electrosurgery, table) default
+// to a cerrah-only team_role restriction so checkDeviceAuthorization's tiering (which
+// reads device.capabilities.requiredTeamRoles) is actually active for devices created
+// through the real API, not just in tests. A caller-provided `capabilities` (including
+// an intentionally empty {}) is always respected as-is and never overridden.
+const HIGH_RISK_DEVICE_GROUPS = ['electrosurgery', 'table'];
+
+function defaultCapabilitiesFor(deviceGroup, providedCapabilities) {
+  if (providedCapabilities !== undefined && providedCapabilities !== null) {
+    return providedCapabilities;
+  }
+  if (HIGH_RISK_DEVICE_GROUPS.includes(deviceGroup)) {
+    return { requiredTeamRoles: ['cerrah'] };
+  }
+  return {};
+}
+
 async function createDevice({ data, institutionId, userId, req }) {
+  const capabilities = defaultCapabilitiesFor(data.deviceGroup, data.capabilities);
   const { rows } = await db.query(
-    `INSERT INTO controllable_devices (institution_id, room_id, name, device_group, device_type, driver_key, requires_physical_confirm)
-     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    `INSERT INTO controllable_devices (institution_id, room_id, name, device_group, device_type, driver_key, requires_physical_confirm, capabilities)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
     [
       institutionId,
       data.roomId ?? null,
@@ -32,6 +50,7 @@ async function createDevice({ data, institutionId, userId, req }) {
       data.deviceType,
       data.driverKey ?? 'mock',
       data.requiresPhysicalConfirm ?? false,
+      JSON.stringify(capabilities),
     ]
   );
   const device = rows[0];
@@ -235,5 +254,5 @@ async function physicalConfirm({ deviceId, institutionId, userId, req }) {
 
 module.exports = {
   listDevices, getDevice, createDevice, updateDeviceConfig, checkDeviceAuthorization,
-  decideCommand, getActiveAssignment, executeCommand, physicalConfirm,
+  decideCommand, getActiveAssignment, executeCommand, physicalConfirm, defaultCapabilitiesFor,
 };

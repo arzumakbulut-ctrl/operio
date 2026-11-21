@@ -108,6 +108,9 @@ const deviceCreateSchema = z.object({
   deviceType:              z.string().min(1).max(50),
   roomId:                  z.string().uuid().optional(),
   requiresPhysicalConfirm: z.boolean().optional(),
+  // Verilmezse createDevice, yüksek riskli gruplar (electrosurgery/table) için
+  // requiredTeamRoles:['cerrah'] varsayılanını uygular (bkz. defaultCapabilitiesFor).
+  capabilities:            z.record(z.any()).optional(),
 });
 
 const deviceCommandSchema = z.object({
