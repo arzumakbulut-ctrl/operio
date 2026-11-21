@@ -195,7 +195,7 @@ export default function SesliKontrolAyarlari() {
                     <select
                       aria-label={`${d.name} mod`}
                       className="fi"
-                      value={d.mode}
+                      value={d.mode || 'SIM'}
                       disabled={busy}
                       onChange={e => changeMode(d.id, e.target.value)}
                       style={{ fontSize: '11.5px', padding: '5px 8px' }}
