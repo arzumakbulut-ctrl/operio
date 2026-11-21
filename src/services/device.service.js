@@ -137,25 +137,40 @@ function decideCommand({ user, device, activeRoomId, teamRole, action }) {
   }
 }
 
-// Caller's current room/team_role, derived from whichever surgery they're actively
-// assigned to right now. No active IN_PROGRESS surgery → both null (never fail-open).
-async function getActiveAssignment({ userId }) {
+// Caller's current room/team_role, derived from the surgery they're actively assigned
+// to right now IN THAT SPECIFIC ROOM (the device's room — always known by the caller).
+// Without the room filter, a user on 2+ IN_PROGRESS surgeries simultaneously could have
+// an arbitrary one picked (no ORDER BY), intermittently denying valid commands with
+// room_mismatch. No matching IN_PROGRESS surgery in that room → both null (never fail-open).
+async function getActiveAssignment({ userId, institutionId, roomId }) {
   const { rows } = await db.query(
     `SELECT s.room_id, st.team_role
      FROM surgery_teams st
      JOIN surgeries s ON s.id = st.surgery_id
-     WHERE st.user_id = $1 AND s.status = 'IN_PROGRESS'
+     WHERE st.user_id = $1 AND s.status = 'IN_PROGRESS' AND s.room_id = $2 AND s.institution_id = $3
      LIMIT 1`,
-    [userId]
+    [userId, roomId, institutionId]
   );
   const row = rows[0];
   return { activeRoomId: row ? row.room_id : null, teamRole: row ? row.team_role : null };
 }
 
+// Writing power_state='ARMED' is conditional on an IN_PROGRESS surgery still existing
+// in the device's room AT WRITE TIME — closes the race where the authorizing surgery
+// (checked earlier, via getActiveAssignment) ends concurrently between that check and
+// this UPDATE. Without this, a device could persist as ARMED with no surgery left to
+// have authorized it, and a later, unrelated team in that room could physicalConfirm a
+// stale move. Any non-ARMED write is unconditional, as before.
 async function updateDeviceStatus({ deviceId, institutionId, status }) {
   const { rows } = await db.query(
-    `UPDATE controllable_devices SET power_state=$1::device_power_state, power_level=$2, updated_at=NOW()
-     WHERE id=$3 AND institution_id=$4 RETURNING *`,
+    `UPDATE controllable_devices
+     SET power_state=$1::device_power_state, power_level=$2, updated_at=NOW()
+     WHERE id=$3 AND institution_id=$4
+       AND ($1::device_power_state <> 'ARMED' OR EXISTS (
+         SELECT 1 FROM surgeries s
+         WHERE s.room_id = controllable_devices.room_id AND s.status = 'IN_PROGRESS'
+       ))
+     RETURNING *`,
     [status.power_state, status.power_level, deviceId, institutionId]
   );
   return rows[0] || null;
@@ -177,7 +192,7 @@ async function executeCommand({ deviceId, institutionId, userId, roleId, action,
     throw new Error('device_not_found');
   }
 
-  const { activeRoomId, teamRole } = await getActiveAssignment({ userId });
+  const { activeRoomId, teamRole } = await getActiveAssignment({ userId, institutionId, roomId: device.room_id });
 
   decideCommand({ user: { roleId }, device, activeRoomId, teamRole, action });
 
@@ -204,6 +219,11 @@ async function executeCommand({ deviceId, institutionId, userId, roleId, action,
   }
 
   const updated = await updateDeviceStatus({ deviceId, institutionId, status });
+  if (!updated) {
+    // Only reachable when status.power_state === 'ARMED' and the authorizing surgery
+    // ended between the decideCommand check above and this write (see updateDeviceStatus).
+    throw new Error('surgery_ended');
+  }
 
   await audit({
     userId, action: 'device:command', resource: 'controllable_devices',
@@ -219,17 +239,22 @@ async function executeCommand({ deviceId, institutionId, userId, roleId, action,
 // requiredTeamRoles check): physicalConfirm models someone physically at the device
 // console confirming a move that an authorized arm_move already armed, and any team
 // member actually in that room can reasonably press the confirm button — not only
-// whoever issued the arm_move. It still must reject anyone with no connection to that
-// room at all, so it applies the same room-membership half of the check that
-// checkDeviceAuthorization uses (reusing getActiveAssignment, same as executeCommand),
-// plus the ARMED-state gate.
-async function physicalConfirm({ deviceId, institutionId, userId, req }) {
+// whoever issued the arm_move. It still checks the caller's roleId against the same
+// ALLOWED_ROLE_IDS list checkDeviceAuthorization uses (for consistency — no role check
+// existed here before), and must reject anyone with no connection to that room at all,
+// so it applies the same room-membership half of the check that checkDeviceAuthorization
+// uses (reusing getActiveAssignment, same as executeCommand), plus the ARMED-state gate.
+async function physicalConfirm({ deviceId, institutionId, userId, roleId, req }) {
+  if (!ALLOWED_ROLE_IDS.includes(roleId)) {
+    throw new Error('role_not_allowed');
+  }
+
   const device = await getDevice({ id: deviceId, institutionId });
   if (!device) {
     throw new Error('device_not_found');
   }
 
-  const { activeRoomId } = await getActiveAssignment({ userId });
+  const { activeRoomId } = await getActiveAssignment({ userId, institutionId, roomId: device.room_id });
   if (activeRoomId == null || device.room_id !== activeRoomId) {
     throw new Error('room_mismatch');
   }
