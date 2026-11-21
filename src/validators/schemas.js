@@ -167,6 +167,11 @@ const deviceConfigSchema = z.object({
   mode:      z.enum(['SIM', 'REAL']).optional(),
 });
 
+// ── KİOSK (Sesli Asistan) ────────────────────────────────────
+const mockConfigSchema = z.object({
+  mode: z.enum(['always_match', 'always_reject_team', 'always_unrecognized', 'cycle']),
+});
+
 // ── SAYFALAMA ────────────────────────────────────────────────
 const paginationSchema = z.object({
   page:  z.coerce.number().int().positive().default(1),
@@ -192,4 +197,5 @@ module.exports = {
   deviceCreateSchema,
   deviceCommandSchema,
   deviceConfigSchema,
+  mockConfigSchema,
 };

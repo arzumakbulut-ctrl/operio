@@ -1,4 +1,6 @@
+const crypto = require('crypto');
 const db = require('../utils/db');
+const { signKioskToken } = require('../utils/kioskJwt');
 
 /**
  * isTokenRevoked — jti'ye ait kiosk_tokens kaydı revoke edilmiş mi?
@@ -42,4 +44,79 @@ async function getActiveSurgeryForRoom(roomId) {
   return { id: rows[0].surgery_id, surgeryTeams };
 }
 
-module.exports = { isTokenRevoked, getActiveSurgeryForRoom };
+/**
+ * createKioskToken — bir oda için yeni kiosk token'ı üretir. O odaya ait,
+ * henüz revoke edilmemiş önceki token varsa önce onu revoke eder (her odada
+ * aynı anda sadece bir aktif token olmalı), sonra yeni bir jti ile
+ * kiosk_tokens'a INSERT eder ve imzalanmış JWT'yi döner.
+ * @returns {Promise<{ token: string, kioskUrl: string }>}
+ */
+async function createKioskToken(institutionId, roomId) {
+  const jti = crypto.randomUUID();
+
+  await db.query(
+    'UPDATE kiosk_tokens SET revoked_at = NOW() WHERE room_id = $1 AND revoked_at IS NULL',
+    [roomId]
+  );
+
+  await db.query(
+    'INSERT INTO kiosk_tokens (institution_id, room_id, jti) VALUES ($1, $2, $3)',
+    [institutionId, roomId, jti]
+  );
+
+  const token = signKioskToken({ institutionId, roomId, jti });
+  return { token, kioskUrl: '/kiosk/' + roomId };
+}
+
+/**
+ * revokeKioskToken — bir odanın aktif (henüz revoke edilmemiş) kiosk
+ * token'ını iptal eder.
+ */
+async function revokeKioskToken(roomId) {
+  await db.query(
+    'UPDATE kiosk_tokens SET revoked_at = NOW() WHERE room_id = $1 AND revoked_at IS NULL',
+    [roomId]
+  );
+}
+
+/**
+ * getMockConfig — kurumun mock konuşmacı-doğrulama konfigürasyonunu getirir.
+ * Kurum için henüz bir satır yoksa (setMockConfig hiç çağrılmamışsa) varsayılan
+ * { mode: 'always_match', cycleIndex: 0 } döner — satır sadece ilk
+ * setMockConfig çağrısında oluşturulur.
+ * @returns {Promise<{ mode: string, cycleIndex: number }>}
+ */
+async function getMockConfig(institutionId) {
+  const { rows } = await db.query(
+    'SELECT mode, cycle_index FROM kiosk_mock_config WHERE institution_id = $1',
+    [institutionId]
+  );
+  if (rows.length === 0) {
+    return { mode: 'always_match', cycleIndex: 0 };
+  }
+  return { mode: rows[0].mode, cycleIndex: rows[0].cycle_index };
+}
+
+/**
+ * setMockConfig — kurumun mock konfigürasyon modunu upsert eder (satır yoksa
+ * oluşturur, varsa mode'u günceller).
+ * @returns {Promise<{ mode: string, cycleIndex: number }>}
+ */
+async function setMockConfig(institutionId, mode) {
+  const { rows } = await db.query(
+    `INSERT INTO kiosk_mock_config (institution_id, mode) VALUES ($1, $2)
+     ON CONFLICT (institution_id) DO UPDATE SET mode = $2
+     RETURNING mode, cycle_index`,
+    [institutionId, mode]
+  );
+  return { mode: rows[0].mode, cycleIndex: rows[0].cycle_index };
+}
+
+module.exports = {
+  isTokenRevoked,
+  getActiveSurgeryForRoom,
+  createKioskToken,
+  revokeKioskToken,
+  getMockConfig,
+  setMockConfig,
+};
