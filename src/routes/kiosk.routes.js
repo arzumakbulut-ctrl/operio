@@ -331,4 +331,13 @@ router.post(
   }
 );
 
+/**
+ * GET /api/kiosk/rooms/:roomId/status
+ *
+ * Kiosk'un oda durumunu sorgular. Sadece kioskRoomAuth'u kullanır — kioskRoomAuth
+ * ameliyat yoksa zaten 409 döner, dolayısıyla buraya gelen her istek aktif bir
+ * ameliyatı olan odaya aittir.
+ */
+router.get('/rooms/:roomId/status', kioskRoomAuth, (req, res) => ok(res, { active: true, surgeryId: req.activeSurgery.id }));
+
 module.exports = router;
