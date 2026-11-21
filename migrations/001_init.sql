@@ -396,3 +396,8 @@ CREATE TABLE IF NOT EXISTS controllable_devices (
 );
 
 CREATE INDEX IF NOT EXISTS idx_controllable_devices_room ON controllable_devices(room_id);
+
+-- Varsayılan satın alınabilir modülleri ekle
+INSERT INTO modules (slug, name, description, price_try, price_usd)
+VALUES ('voice_control', 'Sesli Cihaz Kontrolü', 'Ameliyathanede sesli komutla medikal cihaz kontrolü', 500000, 15000)
+ON CONFLICT (slug) DO NOTHING;
