@@ -1,14 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useDataStore, useUIStore } from '../store';
 import { deviceAPI } from '../services/api.js';
-
-// deviceGroup enum — backend validators/schemas.js deviceCreateSchema ile birebir.
-const GROUP_OPTIONS = [
-  { value: 'electrosurgery',    label: 'Elektrocerrahi' },
-  { value: 'endoscopy_imaging', label: 'Endoskopi / Görüntüleme' },
-  { value: 'light',             label: 'Aydınlatma' },
-  { value: 'table',             label: 'Ameliyat Masası' },
-];
+import { DEVICE_GROUPS, deviceGroupLabel } from '../data/deviceGroups.js';
 
 // Şu an backend registry.js'te kayıtlı tek sürücü 'mock'; yeni sürücüler eklendiğinde
 // buraya eklenir. Cihazın mevcut driver_key'i listede yoksa seçenek olarak eklenir —
@@ -16,10 +9,6 @@ const GROUP_OPTIONS = [
 const KNOWN_DRIVERS = ['mock'];
 
 const EMPTY_FORM = { name: '', deviceGroup: 'electrosurgery', deviceType: '', roomId: '', requiresPhysicalConfirm: false };
-
-function groupLabel(group) {
-  return GROUP_OPTIONS.find(o => o.value === group)?.label || group || '—';
-}
 
 export default function SesliKontrolAyarlari() {
   const { rooms } = useDataStore();
@@ -116,7 +105,7 @@ export default function SesliKontrolAyarlari() {
             <div className="fg">
               <label className="fl" htmlFor="sk-group">Cihaz Grubu</label>
               <select id="sk-group" className="fi" value={form.deviceGroup} onChange={e => f('deviceGroup', e.target.value)}>
-                {GROUP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                {DEVICE_GROUPS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </div>
           </div>
@@ -176,7 +165,7 @@ export default function SesliKontrolAyarlari() {
               return (
                 <tr key={d.id}>
                   <td style={{ fontWeight: 700, fontSize: 13, color: 'var(--slate)' }}>{d.name}</td>
-                  <td style={{ fontSize: 12, color: 'var(--slate-mid)' }}>{groupLabel(d.device_group)}</td>
+                  <td style={{ fontSize: 12, color: 'var(--slate-mid)' }}>{deviceGroupLabel(d.device_group)}</td>
                   <td style={{ fontSize: 12, color: 'var(--slate-mid)' }}>{roomLabel(d.room_id)}</td>
                   <td style={{ fontSize: 12, color: 'var(--slate-mid)' }}>{d.requires_physical_confirm ? 'Evet' : 'Hayır'}</td>
                   <td>
