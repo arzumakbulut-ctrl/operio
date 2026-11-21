@@ -13,6 +13,7 @@ export const ROLES = [
         { ic: 'room',  lbl: 'Salon Yönetimi',         path: '/salonlar' },
         { ic: 'cal',   lbl: 'Doluluk Takvimi',        path: '/takvim' },
         { ic: 'dev',   lbl: 'Cihaz Kontrolü',         path: '/cihaz-kontrol' },
+        { ic: 'set',   lbl: 'Sesli Kontrol Ayarları', path: '/sesli-kontrol-ayarlari' },
       ]},
       { sec: 'Kullanıcılar', items: [
         { ic: 'users', lbl: 'Doktor Yönetimi',        path: '/doktorlar' },
@@ -342,6 +343,7 @@ export const ROLES = [
         { ic: 'equip', lbl: 'Cihaz Envanteri',        path: '/envanter' },
         { ic: 'cal',   lbl: 'Bakım Planı',            path: '/bakim-plan' },
         { ic: 'proc',  lbl: 'Kalibrasyon Kayıtları',  path: '/kalibrasyon' },
+        { ic: 'set',   lbl: 'Sesli Kontrol Ayarları', path: '/sesli-kontrol-ayarlari' },
       ]},
       { sec: 'Servis & Arıza', items: [
         { ic: 'alert', lbl: 'Arıza Bildirimleri',     path: '/ariza-bildirimleri' },
@@ -366,6 +368,7 @@ export const ROLES = [
       { sec: 'Cihaz & Bakım', items: [
         { ic: 'equip', lbl: 'Cihaz Listesi',          path: '/envanter' },
         { ic: 'cal',   lbl: 'Bakım Takvimi',          path: '/bakim-takvimi' },
+        { ic: 'set',   lbl: 'Sesli Kontrol Ayarları', path: '/sesli-kontrol-ayarlari' },
       ]},
       { sec: 'Stok & Parça', items: [
         { ic: 'proc',  lbl: 'Parça & Sarf Takibi',    path: '/parca-takip' },

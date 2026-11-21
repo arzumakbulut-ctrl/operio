@@ -24,6 +24,7 @@ import EgitimKutuphane   from './pages/EgitimKutuphane';
 import Dokumanlar        from './pages/Dokumanlar';
 import Envanter          from './pages/Envanter';
 import CihazKontrol      from './pages/CihazKontrol';
+import SesliKontrolAyarlari from './pages/SesliKontrolAyarlari';
 import MisafirHekimYonetim from './pages/MisafirHekimYonetim';
 import Roller            from './pages/Roller';
 import SterilDepo        from './pages/SterilDepo';
@@ -214,6 +215,7 @@ export default function App() {
         <Route path="/steril-gecmis" element={<ProtectedLayout><SterilGecmis /></ProtectedLayout>} />
         <Route path="/steril-personel" element={<ProtectedLayout><SterilPersonel /></ProtectedLayout>} />
         <Route path="/cihaz-kontrol" element={<ProtectedLayout><CihazKontrol /></ProtectedLayout>} />
+        <Route path="/sesli-kontrol-ayarlari" element={<ProtectedLayout><SesliKontrolAyarlari /></ProtectedLayout>} />
 
         {/* ── DOKTOR ── */}
         <Route path="/talep"       element={<ProtectedLayout><AmeliyatTalebi /></ProtectedLayout>} />
