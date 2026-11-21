@@ -690,7 +690,7 @@ git commit -m "fix(devices): auto-revert ARMED devices when surgery leaves IN_PR
 
 **Files:**
 - Modify: `operio-react/operio/src/services/api.js`
-- Test: `operio-react/operio/src/services/api.test.js`
+- Test: `operio-react/operio/tests/unit/api.test.js` (not alongside `src/` — this project's `vitest.config.js` only includes `tests/**/*.test.{js,jsx}`; `tests/setup.js` has been created already, no other setup needed)
 
 **Interfaces:**
 - Consumes: Mevcut `request()`/`get`/`post`/`patch` yardımcıları (dosyanın kendi içinde).
@@ -705,7 +705,7 @@ describe('deviceAPI', () => {
   beforeEach(() => { global.fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ success: true, data: { id: 'd1' } }) }); });
 
   it('command() doğru endpoint ve body ile POST atmalı', async () => {
-    const { deviceAPI } = await import('./api.js');
+    const { deviceAPI } = await import('../../src/services/api.js');
     await deviceAPI.command('d1', { action: 'turn_on' });
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/devices/d1/command'),
@@ -717,7 +717,7 @@ describe('deviceAPI', () => {
 
 - [ ] **Step 2: Testi çalıştır, başarısız olduğunu doğrula**
 
-Run: `npm run test:unit -- api.test` (operio-react dizininde)
+Run: `npm run test:unit` (çalıştırılacak filtre argümanı bu projede dosya adıyla daraltmayabilir — tüm `tests/unit/` paketini çalıştırıp yeni testin sonucuna bak)
 Expected: FAIL — `deviceAPI` tanımsız
 
 - [ ] **Step 3: `deviceAPI`/`moduleAPI`'yi ekle**
@@ -726,13 +726,13 @@ Mevcut `surgeriesAPI`/`roomsAPI` desenini birebir takip et (`get`/`post`/`patch`
 
 - [ ] **Step 4: Testi çalıştır, geçtiğini doğrula**
 
-Run: `npm run test:unit -- api.test`
+Run: `npm run test:unit`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/services/api.js src/services/api.test.js
+git add src/services/api.js tests/unit/api.test.js
 git commit -m "feat(api): add deviceAPI and moduleAPI client helpers"
 ```
 
@@ -742,7 +742,7 @@ git commit -m "feat(api): add deviceAPI and moduleAPI client helpers"
 
 **Files:**
 - Create: `operio-react/operio/src/pages/CihazKontrol.jsx`
-- Create: `operio-react/operio/src/pages/CihazKontrol.test.jsx`
+- Create: `operio-react/operio/tests/components/CihazKontrol.test.jsx` (not alongside `src/` — `vitest.config.js` only includes `tests/**/*.test.{js,jsx}`)
 - Modify: `operio-react/operio/src/App.jsx` (route ekle: `/cihaz-kontrol`)
 - Modify: `operio-react/operio/src/data/roles.js` (nav girişi ekle — rol 0,1,2,3,4,5,6 için)
 
@@ -755,9 +755,9 @@ git commit -m "feat(api): add deviceAPI and moduleAPI client helpers"
 ```jsx
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import CihazKontrol from './CihazKontrol.jsx';
+import CihazKontrol from '../../src/pages/CihazKontrol.jsx';
 
-vi.mock('../services/api.js', () => ({
+vi.mock('../../src/services/api.js', () => ({
   deviceAPI: {
     list: vi.fn().mockResolvedValue([{ id: 'd1', name: 'Elektrokoter', mode: 'SIM', power_state: 'OFF', device_group: 'electrosurgery' }]),
     command: vi.fn().mockResolvedValue({ id: 'd1', power_state: 'ON' }),
@@ -772,7 +772,7 @@ describe('CihazKontrol', () => {
   });
 
   it('Aç butonuna tıklanınca deviceAPI.command çağrılmalı', async () => {
-    const { deviceAPI } = await import('../services/api.js');
+    const { deviceAPI } = await import('../../src/services/api.js');
     render(<CihazKontrol />);
     fireEvent.click(await screen.findByRole('button', { name: /aç/i }));
     await waitFor(() => expect(deviceAPI.command).toHaveBeenCalledWith('d1', expect.objectContaining({ action: 'turn_on' })));
@@ -782,7 +782,7 @@ describe('CihazKontrol', () => {
 
 - [ ] **Step 2: Testi çalıştır, başarısız olduğunu doğrula**
 
-Run: `npm run test:components -- CihazKontrol`
+Run: `npm run test:components` (dosya adı filtresi bu projede güvenilir olmayabilir — tüm `tests/components/` paketini çalıştırıp yeni testin sonucuna bak)
 Expected: FAIL — bileşen yok
 
 - [ ] **Step 3: `CihazKontrol.jsx`'i yaz; route ve nav girişini ekle**
@@ -791,13 +791,13 @@ Mevcut sayfa stillerine uyan kart grid'i (bkz. `SalonYonetim.jsx` için benzer k
 
 - [ ] **Step 4: Testi çalıştır, geçtiğini doğrula**
 
-Run: `npm run test:components -- CihazKontrol`
+Run: `npm run test:components`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/pages/CihazKontrol.jsx src/pages/CihazKontrol.test.jsx src/App.jsx src/data/roles.js
+git add src/pages/CihazKontrol.jsx tests/components/CihazKontrol.test.jsx src/App.jsx src/data/roles.js
 git commit -m "feat(devices): add CihazKontrol page with manual device controls"
 ```
 
@@ -807,7 +807,7 @@ git commit -m "feat(devices): add CihazKontrol page with manual device controls"
 
 **Files:**
 - Create: `operio-react/operio/src/pages/SesliKontrolAyarlari.jsx`
-- Create: `operio-react/operio/src/pages/SesliKontrolAyarlari.test.jsx`
+- Create: `operio-react/operio/tests/components/SesliKontrolAyarlari.test.jsx` (not alongside `src/` — `vitest.config.js` only includes `tests/**/*.test.{js,jsx}`)
 - Modify: `operio-react/operio/src/App.jsx` (route ekle: `/sesli-kontrol-ayarlari`)
 - Modify: `operio-react/operio/src/data/roles.js` (nav girişi — sadece rol 0, 11, 12)
 
@@ -820,9 +820,9 @@ git commit -m "feat(devices): add CihazKontrol page with manual device controls"
 ```jsx
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import SesliKontrolAyarlari from './SesliKontrolAyarlari.jsx';
+import SesliKontrolAyarlari from '../../src/pages/SesliKontrolAyarlari.jsx';
 
-vi.mock('../services/api.js', () => ({
+vi.mock('../../src/services/api.js', () => ({
   deviceAPI: {
     list: vi.fn().mockResolvedValue([{ id: 'd1', name: 'Elektrokoter', mode: 'SIM' }]),
     updateConfig: vi.fn().mockResolvedValue({ id: 'd1', mode: 'REAL' }),
@@ -831,7 +831,7 @@ vi.mock('../services/api.js', () => ({
 
 describe('SesliKontrolAyarlari', () => {
   it('mod değiştirme kontrolü deviceAPI.updateConfig çağırmalı', async () => {
-    const { deviceAPI } = await import('../services/api.js');
+    const { deviceAPI } = await import('../../src/services/api.js');
     render(<SesliKontrolAyarlari />);
     const select = await screen.findByLabelText(/mod/i);
     fireEvent.change(select, { target: { value: 'REAL' } });
@@ -842,7 +842,7 @@ describe('SesliKontrolAyarlari', () => {
 
 - [ ] **Step 2: Testi çalıştır, başarısız olduğunu doğrula**
 
-Run: `npm run test:components -- SesliKontrolAyarlari`
+Run: `npm run test:components` (dosya adı filtresi bu projede güvenilir olmayabilir)
 Expected: FAIL
 
 - [ ] **Step 3: `SesliKontrolAyarlari.jsx`'i yaz; route ve nav girişini ekle**
@@ -851,13 +851,13 @@ Basit bir tablo/form: cihaz listesi + yeni cihaz ekleme formu (`name`, `deviceGr
 
 - [ ] **Step 4: Testi çalıştır, geçtiğini doğrula**
 
-Run: `npm run test:components -- SesliKontrolAyarlari`
+Run: `npm run test:components`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/pages/SesliKontrolAyarlari.jsx src/pages/SesliKontrolAyarlari.test.jsx src/App.jsx src/data/roles.js
+git add src/pages/SesliKontrolAyarlari.jsx tests/components/SesliKontrolAyarlari.test.jsx src/App.jsx src/data/roles.js
 git commit -m "feat(devices): add SesliKontrolAyarlari admin page for device/driver/mode management"
 ```
 
@@ -867,7 +867,7 @@ git commit -m "feat(devices): add SesliKontrolAyarlari admin page for device/dri
 
 **Files:**
 - Modify: `operio-react/operio/src/pages/AbonelikYonetim.jsx`
-- Create: `operio-react/operio/src/pages/AbonelikYonetim.modules.test.jsx`
+- Create: `operio-react/operio/tests/components/AbonelikYonetim.modules.test.jsx` (not alongside `src/` — `vitest.config.js` only includes `tests/**/*.test.{js,jsx}`)
 
 **Interfaces:**
 - Consumes: `moduleAPI.list/mine/purchase` (Task 10).
@@ -878,9 +878,9 @@ git commit -m "feat(devices): add SesliKontrolAyarlari admin page for device/dri
 ```jsx
 import { describe, it, expect, vi, waitFor } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import AbonelikYonetim from './AbonelikYonetim.jsx';
+import AbonelikYonetim from '../../src/pages/AbonelikYonetim.jsx';
 
-vi.mock('../services/api.js', () => ({
+vi.mock('../../src/services/api.js', () => ({
   moduleAPI: {
     list: vi.fn().mockResolvedValue([{ slug: 'voice_control', name: 'Sesli Kontrol', price_try: 500000 }]),
     mine: vi.fn().mockResolvedValue([]),
@@ -897,7 +897,7 @@ describe('AbonelikYonetim — Modüller bölümü', () => {
   });
 
   it('Satın Al tıklanınca moduleAPI.purchase çağrılmalı', async () => {
-    const { moduleAPI } = await import('../services/api.js');
+    const { moduleAPI } = await import('../../src/services/api.js');
     render(<AbonelikYonetim />);
     fireEvent.click(await screen.findByRole('button', { name: /satın al/i }));
     await waitFor(() => expect(moduleAPI.purchase).toHaveBeenCalledWith('voice_control'));
@@ -907,7 +907,7 @@ describe('AbonelikYonetim — Modüller bölümü', () => {
 
 - [ ] **Step 2: Testi çalıştır, başarısız olduğunu doğrula**
 
-Run: `npm run test:components -- AbonelikYonetim.modules`
+Run: `npm run test:components` (dosya adı filtresi bu projede güvenilir olmayabilir)
 Expected: FAIL
 
 - [ ] **Step 3: `AbonelikYonetim.jsx`'e "Modüller/Eklentiler" bölümünü ekle**
@@ -916,13 +916,13 @@ Mevcut sayfanın stiline uyan bir kart listesi: her modül için isim, fiyat, "S
 
 - [ ] **Step 4: Testi çalıştır, geçtiğini doğrula**
 
-Run: `npm run test:components -- AbonelikYonetim.modules`
+Run: `npm run test:components`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/pages/AbonelikYonetim.jsx src/pages/AbonelikYonetim.modules.test.jsx
+git add src/pages/AbonelikYonetim.jsx tests/components/AbonelikYonetim.modules.test.jsx
 git commit -m "feat(billing): add purchasable modules section to AbonelikYonetim"
 ```
 
