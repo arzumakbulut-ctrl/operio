@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUIStore } from '../store';
 import Modal from '../components/ui/Modal';
+import { moduleAPI } from '../services/api.js';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
@@ -66,6 +67,40 @@ export default function AbonelikYonetim() {
   const [loading, setLoading]   = useState(true);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+
+  const [modules, setModules]       = useState([]);
+  const [ownedSlugs, setOwnedSlugs] = useState([]);
+  const [modulesLoading, setModulesLoading] = useState(true);
+  const [purchasingSlug, setPurchasingSlug] = useState(null);
+
+  async function loadModules() {
+    setModulesLoading(true);
+    try {
+      const [list, mine] = await Promise.all([
+        moduleAPI.list().catch(() => []),
+        moduleAPI.mine().catch(() => []),
+      ]);
+      setModules(Array.isArray(list) ? list : []);
+      setOwnedSlugs(Array.isArray(mine) ? mine.map(m => m.slug) : []);
+    } finally {
+      setModulesLoading(false);
+    }
+  }
+
+  useEffect(() => { loadModules(); }, []);
+
+  async function handlePurchase(slug) {
+    setPurchasingSlug(slug);
+    try {
+      await moduleAPI.purchase(slug);
+      showToast('Modül satın alındı');
+      await loadModules();
+    } catch (e) {
+      showToast('⚠️ Modül satın alınamadı');
+    } finally {
+      setPurchasingSlug(null);
+    }
+  }
 
   useEffect(() => {
     Promise.all([
@@ -315,6 +350,55 @@ export default function AbonelikYonetim() {
             <div className="empty-text">Henüz fatura yok</div>
           </div>
         )}
+      </div>
+
+      {/* Modüller / Eklentiler */}
+      <div className="panel" style={{ marginTop: 18 }}>
+        <div className="panel-hd">
+          <div className="panel-title">Modüller / Eklentiler</div>
+          <span style={{ fontSize: 11, color: 'var(--slate-light)' }}>{modules.length} modül</span>
+        </div>
+        <div style={{ padding: '18px 20px' }}>
+          {modulesLoading ? (
+            <div style={{ color: 'var(--slate-light)', fontSize: 13, textAlign: 'center', padding: 24 }}>
+              Modüller yükleniyor…
+            </div>
+          ) : modules.length > 0 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
+              {modules.map(mod => {
+                const owned = ownedSlugs.includes(mod.slug);
+                const satinAliniyor = purchasingSlug === mod.slug;
+                return (
+                  <div key={mod.slug} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ fontWeight: 700, color: 'var(--slate)', fontSize: 14 }}>{mod.name}</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--slate)', fontFamily: "'Outfit',sans-serif" }}>
+                      ₺{Math.round((mod.price_try || 0) / 100).toLocaleString('tr-TR')}
+                      <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--slate-light)' }}> /ay</span>
+                    </div>
+                    {owned ? (
+                      <span className="tag" style={{ background: 'rgba(5,150,105,0.1)', color: '#059669', alignSelf: 'flex-start' }}>
+                        Aktif
+                      </span>
+                    ) : (
+                      <button
+                        className="btn btn-primary btn-sm"
+                        disabled={satinAliniyor}
+                        style={{ alignSelf: 'flex-start', opacity: satinAliniyor ? 0.7 : 1 }}
+                        onClick={() => handlePurchase(mod.slug)}
+                      >
+                        {satinAliniyor ? 'Satın alınıyor…' : 'Satın Al'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ color: 'var(--slate-light)', fontSize: 13, textAlign: 'center', padding: 24 }}>
+              Satın alınabilir modül bulunamadı
+            </div>
+          )}
+        </div>
       </div>
 
       {/* İptal onay modal */}
