@@ -10,8 +10,25 @@ const GROUP_LABELS = {
   table:          'Ameliyat Masası',
 };
 
+const GROUP_ABBR = {
+  electrosurgery: 'EC',
+  anesthesia:     'AN',
+  lighting:       'IŞ',
+  imaging:        'GÖ',
+  table:          'MS',
+};
+
 function groupLabel(group) {
   return GROUP_LABELS[group] || group || 'Genel';
+}
+
+// sc2-num slotu kısa (1-2 karakter) bir rozet için tasarlandı — tam grup
+// adı (örn. "Elektrocerrahi") orada taşar/sarılır. Kısa kısaltma kullan;
+// tam ad zaten sc2-cap'te (footer) gösteriliyor.
+function groupAbbr(group) {
+  if (GROUP_ABBR[group]) return GROUP_ABBR[group];
+  if (!group) return '—';
+  return group.slice(0, 2).toUpperCase();
 }
 
 export default function CihazKontrol() {
@@ -84,7 +101,7 @@ export default function CihazKontrol() {
           return (
             <div key={d.id} className="salon-card-v2">
               <div className="sc2-top">
-                <div className="sc2-num">{groupLabel(d.device_group)}</div>
+                <div className="sc2-num">{groupAbbr(d.device_group)}</div>
                 {isSim && (
                   <span
                     className="tag"
