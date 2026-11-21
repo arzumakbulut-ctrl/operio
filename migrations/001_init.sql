@@ -401,3 +401,39 @@ CREATE INDEX IF NOT EXISTS idx_controllable_devices_room ON controllable_devices
 INSERT INTO modules (slug, name, description, price_try, price_usd)
 VALUES ('voice_control', 'Sesli Cihaz Kontrolü', 'Ameliyathanede sesli komutla medikal cihaz kontrolü', 500000, 15000)
 ON CONFLICT (slug) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS voice_profiles (
+  id            UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id       UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  embedding     BYTEA       NOT NULL,
+  model_version VARCHAR(30) NOT NULL,
+  enrolled_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id)
+);
+
+CREATE TABLE IF NOT EXISTS kiosk_tokens (
+  id             UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  institution_id UUID        NOT NULL REFERENCES institutions(id),
+  room_id        UUID        NOT NULL REFERENCES operating_rooms(id),
+  jti            VARCHAR(64) NOT NULL UNIQUE,
+  revoked_at     TIMESTAMPTZ,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_kiosk_tokens_room ON kiosk_tokens(room_id);
+
+CREATE TABLE IF NOT EXISTS kiosk_mock_config (
+  institution_id UUID        PRIMARY KEY REFERENCES institutions(id),
+  mode           VARCHAR(20) NOT NULL DEFAULT 'always_match'
+                 CHECK (mode IN ('always_match','always_reject_team','always_unrecognized','cycle')),
+  cycle_index    INTEGER     NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS user_spotify_connections (
+  id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id         UUID        NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+  spotify_user_id VARCHAR(100) NOT NULL,
+  access_token    TEXT        NOT NULL,
+  refresh_token   TEXT        NOT NULL,
+  expires_at      TIMESTAMPTZ NOT NULL,
+  connected_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
