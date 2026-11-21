@@ -45,34 +45,67 @@ async function getActiveSurgeryForRoom(roomId) {
 }
 
 /**
- * createKioskToken — bir oda için yeni kiosk token'ı üretir. O odaya ait,
- * henüz revoke edilmemiş önceki token varsa önce onu revoke eder (her odada
- * aynı anda sadece bir aktif token olmalı), sonra yeni bir jti ile
- * kiosk_tokens'a INSERT eder ve imzalanmış JWT'yi döner.
+ * assertRoomOwnership — roomId'nin gerçekten institutionId'ye ait olduğunu
+ * doğrular (room.service.js'teki getRoom ile aynı sorgu deseni). Kurum A'nın
+ * admin'inin kurum B'nin oda UUID'siyle kiosk token üretmesini/iptal etmesini
+ * engeller (IDOR — cross-tenant erişim).
+ */
+async function assertRoomOwnership(institutionId, roomId) {
+  const { rows } = await db.query(
+    'SELECT id FROM operating_rooms WHERE id=$1 AND institution_id=$2',
+    [roomId, institutionId]
+  );
+  if (rows.length === 0) {
+    throw Object.assign(new Error('Oda bulunamadı'), { statusCode: 404 });
+  }
+}
+
+/**
+ * createKioskToken — bir oda için yeni kiosk token'ı üretir. Önce roomId'nin
+ * institutionId'ye ait olduğunu doğrular (cross-tenant koruması), sonra o
+ * odaya ait henüz revoke edilmemiş önceki token varsa onu revoke eder (her
+ * odada aynı anda sadece bir aktif token olmalı), yeni bir jti ile
+ * kiosk_tokens'a INSERT eder ve imzalanmış JWT'yi döner. Revoke+insert tek
+ * bir transaction içinde yapılır — iki eşzamanlı çağrının her ikisinin de
+ * revoke edip her ikisinin de insert ederek odada iki aktif token bırakmasını
+ * (race condition) engeller.
  * @returns {Promise<{ token: string, kioskUrl: string }>}
  */
 async function createKioskToken(institutionId, roomId) {
-  const jti = crypto.randomUUID();
+  return db.transaction(async (client) => {
+    const { rows } = await client.query(
+      'SELECT id FROM operating_rooms WHERE id=$1 AND institution_id=$2',
+      [roomId, institutionId]
+    );
+    if (rows.length === 0) {
+      throw Object.assign(new Error('Oda bulunamadı'), { statusCode: 404 });
+    }
 
-  await db.query(
-    'UPDATE kiosk_tokens SET revoked_at = NOW() WHERE room_id = $1 AND revoked_at IS NULL',
-    [roomId]
-  );
+    const jti = crypto.randomUUID();
 
-  await db.query(
-    'INSERT INTO kiosk_tokens (institution_id, room_id, jti) VALUES ($1, $2, $3)',
-    [institutionId, roomId, jti]
-  );
+    await client.query(
+      'UPDATE kiosk_tokens SET revoked_at = NOW() WHERE room_id = $1 AND revoked_at IS NULL',
+      [roomId]
+    );
 
-  const token = signKioskToken({ institutionId, roomId, jti });
-  return { token, kioskUrl: '/kiosk/' + roomId };
+    await client.query(
+      'INSERT INTO kiosk_tokens (institution_id, room_id, jti) VALUES ($1, $2, $3)',
+      [institutionId, roomId, jti]
+    );
+
+    const token = signKioskToken({ institutionId, roomId, jti });
+    return { token, kioskUrl: '/kiosk/' + roomId };
+  });
 }
 
 /**
  * revokeKioskToken — bir odanın aktif (henüz revoke edilmemiş) kiosk
- * token'ını iptal eder.
+ * token'ını iptal eder. Önce roomId'nin institutionId'ye ait olduğunu
+ * doğrular (cross-tenant koruması — bkz. createKioskToken).
  */
-async function revokeKioskToken(roomId) {
+async function revokeKioskToken(institutionId, roomId) {
+  await assertRoomOwnership(institutionId, roomId);
+
   await db.query(
     'UPDATE kiosk_tokens SET revoked_at = NOW() WHERE room_id = $1 AND revoked_at IS NULL',
     [roomId]

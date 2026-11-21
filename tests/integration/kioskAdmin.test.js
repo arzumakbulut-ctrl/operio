@@ -48,6 +48,18 @@ describe('POST /api/kiosk-admin/rooms/:roomId/token', () => {
     // yapıldığının doğrulanması, revoke+create akışının tetiklendiğini gösterir.
     expect(mockKioskService.createKioskToken).toHaveBeenCalledWith('inst-1', 'room-1');
   });
+
+  it('başka kuruma ait oda (cross-tenant) → servis 404 statusCode ile reddeder, route 404 döner', async () => {
+    mockKioskService.createKioskToken.mockRejectedValueOnce(
+      Object.assign(new Error('Oda bulunamadı'), { statusCode: 404 })
+    );
+
+    const res = await request
+      .post('/api/kiosk-admin/rooms/other-institutions-room/token')
+      .set('Authorization', `Bearer ${tok(0)}`);
+
+    expect(res.status).toBe(404);
+  });
 });
 
 describe('POST /api/kiosk-admin/rooms/:roomId/token/revoke', () => {
@@ -65,7 +77,21 @@ describe('POST /api/kiosk-admin/rooms/:roomId/token/revoke', () => {
       .post('/api/kiosk-admin/rooms/room-1/token/revoke')
       .set('Authorization', `Bearer ${tok(0)}`);
     expect(res.status).toBe(200);
-    expect(mockKioskService.revokeKioskToken).toHaveBeenCalledWith('room-1');
+    // revokeKioskToken artık institutionId de alıyor (cross-tenant koruması için) —
+    // route req.user.institutionId'yi ilk argüman olarak geçirmeli.
+    expect(mockKioskService.revokeKioskToken).toHaveBeenCalledWith('inst-1', 'room-1');
+  });
+
+  it('başka kuruma ait oda (cross-tenant) → servis 404 statusCode ile reddeder, route 404 döner', async () => {
+    mockKioskService.revokeKioskToken.mockRejectedValueOnce(
+      Object.assign(new Error('Oda bulunamadı'), { statusCode: 404 })
+    );
+
+    const res = await request
+      .post('/api/kiosk-admin/rooms/other-institutions-room/token/revoke')
+      .set('Authorization', `Bearer ${tok(0)}`);
+
+    expect(res.status).toBe(404);
   });
 });
 
