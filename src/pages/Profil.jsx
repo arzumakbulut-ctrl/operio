@@ -1,7 +1,26 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuthStore, useUIStore } from '../store';
 import { ROLES } from '../data/roles';
 import Modal from '../components/ui/Modal';
+import { voiceProfileAPI } from '../services/api.js';
+
+// Kayıt sırasında kullanıcıya okutulan sabit pasaj — plan kararı, aynen kullanılıyor.
+const SES_PASAJI = 'Operio ses profilimi oluşturuyorum, bu cümleyi kendi doğal konuşma hızımla okuyorum.';
+// Kayıt otomatik olarak bu süre (ms) sonunda durur — basitlik için sabit süre tercih edildi
+// (kullanıcının elle durdurması yerine); 5 saniye tek cümlelik pasaj için yeterli.
+const KAYIT_SURESI_MS = 5000;
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = String(reader.result || '');
+      resolve(result.split(',')[1] || '');
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
 
 export default function Profil() {
   const { curRole, user } = useAuthStore();
@@ -11,6 +30,13 @@ export default function Profil() {
   const [sifreModal, setSifreModal] = useState(false);
   const [sifreForm, setSifreForm] = useState({ eski: '', yeni: '', tekrar: '' });
 
+  // Ses profili (konuşmacı doğrulama kaydı)
+  const [sesProfili, setSesProfili] = useState(null);
+  const [kayitYapiliyor, setKayitYapiliyor] = useState(false);
+  const [kayitGonderiliyor, setKayitGonderiliyor] = useState(false);
+  const recorderRef = useRef(null);
+  const kayitTimeoutRef = useRef(null);
+
   useEffect(() => {
     fetch('http://localhost:4000/api/auth/me', {
       headers: { 'Authorization': 'Bearer ' + token }
@@ -18,6 +44,57 @@ export default function Profil() {
       .then(data => { if(data) setDbUser(data); })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    voiceProfileAPI.get()
+      .then(profil => { if (mounted) setSesProfili(profil); })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+      if (kayitTimeoutRef.current) clearTimeout(kayitTimeoutRef.current);
+    };
+  }, []);
+
+  async function sesKaydiBaslat() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const chunks = [];
+      const recorder = new MediaRecorder(stream);
+      recorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunks.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        setKayitYapiliyor(false);
+        setKayitGonderiliyor(true);
+        try {
+          const blob = new Blob(chunks, { type: 'audio/webm' });
+          const base64 = await blobToBase64(blob);
+          const profil = await voiceProfileAPI.enroll(base64);
+          setSesProfili(profil);
+          showToast('Ses profiliniz oluşturuldu');
+        } catch (err) {
+          showToast('Ses profili kaydedilemedi, lütfen tekrar deneyin');
+        } finally {
+          setKayitGonderiliyor(false);
+        }
+      };
+
+      recorder.start();
+      setKayitYapiliyor(true);
+      kayitTimeoutRef.current = setTimeout(() => {
+        if (recorderRef.current && recorderRef.current.state === 'recording') {
+          recorderRef.current.stop();
+        }
+      }, KAYIT_SURESI_MS);
+    } catch (err) {
+      showToast('Mikrofon izni verilmedi');
+    }
+  }
 
   async function sifreDegistir() {
     if (!sifreForm.yeni || sifreForm.yeni !== sifreForm.tekrar) { showToast('Yeni sifreler eslesmiyor'); return; }
@@ -162,6 +239,52 @@ export default function Profil() {
                   <span style={{ fontSize:11, color:'var(--slate-light)', fontWeight:600 }}>{yil}</span>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Ses Profili */}
+          <div className="panel">
+            <div className="panel-hd">
+              <div className="panel-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight:6, verticalAlign:'middle' }}>
+                  <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+                </svg>
+                Ses Profili
+              </div>
+            </div>
+            <div style={{ padding:'14px 18px' }}>
+              {sesProfili ? (
+                <>
+                  <div style={{ fontSize:12.5, color:'var(--slate)', fontWeight:600 }}>Ses profiliniz oluşturuldu</div>
+                  <div style={{ fontSize:11, color:'var(--slate-light)', marginTop:4 }}>
+                    Kayıt tarihi: {new Date(sesProfili.enrolledAt).toLocaleDateString('tr-TR')}
+                  </div>
+                  <button
+                    className="btn btn-secondary"
+                    style={{ marginTop:12 }}
+                    disabled={kayitYapiliyor || kayitGonderiliyor}
+                    onClick={sesKaydiBaslat}
+                  >
+                    {kayitYapiliyor ? 'Kaydediliyor...' : kayitGonderiliyor ? 'Gönderiliyor...' : 'Yeniden Kaydet'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize:12, color:'var(--slate-light)', lineHeight:1.5 }}>
+                    Ses profili oluşturmak için aşağıdaki cümleyi kendi doğal konuşma hızınızla okuyun:
+                  </div>
+                  <div style={{ fontSize:12.5, color:'var(--slate)', fontWeight:600, fontStyle:'italic', margin:'8px 0 12px', padding:'10px 12px', background:'var(--surface)', borderRadius:8, border:'1px solid var(--border)' }}>
+                    "{SES_PASAJI}"
+                  </div>
+                  <button
+                    className="btn btn-secondary"
+                    disabled={kayitYapiliyor || kayitGonderiliyor}
+                    onClick={sesKaydiBaslat}
+                  >
+                    {kayitYapiliyor ? 'Kaydediliyor...' : kayitGonderiliyor ? 'Gönderiliyor...' : 'Kayda Başla'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
