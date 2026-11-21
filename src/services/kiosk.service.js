@@ -145,6 +145,23 @@ async function setMockConfig(institutionId, mode) {
   return { mode: rows[0].mode, cycleIndex: rows[0].cycle_index };
 }
 
+/**
+ * incrementMockCycleIndex — 'cycle' modunda bir sonraki identify() çağrısının
+ * farklı bir candidate döndürmesi için cycle_index'i 1 artırır (upsert —
+ * kurum için henüz satır yoksa cycle_index=1 ile oluşturur, setMockConfig ile
+ * aynı upsert deseni). mode'a dokunmaz, sadece cycle_index'i ilerletir.
+ * @returns {Promise<number>} yeni cycleIndex
+ */
+async function incrementMockCycleIndex(institutionId) {
+  const { rows } = await db.query(
+    `INSERT INTO kiosk_mock_config (institution_id, cycle_index) VALUES ($1, 1)
+     ON CONFLICT (institution_id) DO UPDATE SET cycle_index = kiosk_mock_config.cycle_index + 1
+     RETURNING cycle_index`,
+    [institutionId]
+  );
+  return rows[0].cycle_index;
+}
+
 module.exports = {
   isTokenRevoked,
   getActiveSurgeryForRoom,
@@ -152,4 +169,5 @@ module.exports = {
   revokeKioskToken,
   getMockConfig,
   setMockConfig,
+  incrementMockCycleIndex,
 };
