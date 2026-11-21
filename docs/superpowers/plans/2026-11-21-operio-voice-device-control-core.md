@@ -34,9 +34,10 @@
 
 ## Task 1: Veritabanı şeması — modules, institution_modules, controllable_devices
 
+> **Not (preflight'ta düzeltildi):** Bu projenin test takımı (`tests/setup.js`) `src/utils/db`'yi global olarak mock'luyor — hiçbir test gerçek bir PostgreSQL'e bağlanmıyor. Bu yüzden migration'ın doğruluğu bir vitest testiyle değil, **gerçek dev Postgres container'ına uygulanarak** doğrulanır (aşağıdaki Step 2).
+
 **Files:**
 - Modify: `operio-backend/operio-backend/migrations/001_init.sql` (sona ekle)
-- Test: `operio-backend/operio-backend/tests/integration/schema.devicemodule.test.js`
 
 **Interfaces:**
 - Produces: `modules`, `institution_modules`, `controllable_devices` tabloları; `device_power_state` (`'OFF'|'STANDBY'|'ON'|'ARMED'`), `device_mode` (`'SIM'|'REAL'`) enum'ları. Sonraki tüm task'lar bu şemayı kullanır.
@@ -98,40 +99,20 @@ CREATE TABLE IF NOT EXISTS controllable_devices (
 CREATE INDEX IF NOT EXISTS idx_controllable_devices_room ON controllable_devices(room_id);
 ```
 
-- [ ] **Step 2: Test veritabanına migration'ı uygula ve tabloların/kısıtların varlığını doğrula**
+- [ ] **Step 2: Migration'ı çalışan dev Postgres'e (operio_postgres container) uygula**
 
-```js
-import { describe, it, expect, beforeAll } from 'vitest';
-import db from '../../src/utils/db.js';
+Run: `docker exec -i operio_postgres psql -U operio -d operio_db < migrations/001_init.sql`
+Expected: Çıktıda hata yok; `CREATE TYPE`/`CREATE TABLE`/`CREATE INDEX` satırları görünür (zaten var olan tablolar için `CREATE TABLE IF NOT EXISTS` sessizce atlanır, yeni üçü için `CREATE TABLE` yazdırılır).
 
-describe('Schema — modules/institution_modules/controllable_devices', () => {
-  it('üç tablo da information_schema\'da görünmeli', async () => {
-    const { rows } = await db.query(
-      `SELECT table_name FROM information_schema.tables
-       WHERE table_name IN ('modules','institution_modules','controllable_devices')`
-    );
-    expect(rows.map(r => r.table_name).sort())
-      .toEqual(['controllable_devices','institution_modules','modules']);
-  });
+- [ ] **Step 3: Tabloların ve kısıtın gerçekten oluştuğunu `psql` ile doğrula**
 
-  it('institution_modules (institution_id, module_slug) üzerinde UNIQUE olmalı', async () => {
-    const { rows } = await db.query(
-      `SELECT conname FROM pg_constraint WHERE conrelid = 'institution_modules'::regclass AND contype='u'`
-    );
-    expect(rows.length).toBeGreaterThan(0);
-  });
-});
-```
-
-- [ ] **Step 3: Testi çalıştır ve geçtiğini doğrula**
-
-Run: `npm run test:integration -- schema.devicemodule`
-Expected: PASS (migration zaten `docker-compose`'un `psql -f migrations/001_init.sql` adımıyla test DB'sine uygulanmış olmalı — gerekirse önce `npm run docker:up` veya mevcut test DB bootstrap scriptini çalıştır)
+Run: `docker exec -i operio_postgres psql -U operio -d operio_db -c "\d institution_modules"`
+Expected: Çıktıda `"institution_modules_institution_id_module_slug_key" UNIQUE CONSTRAINT` satırı görünür; ayrıca `docker exec -i operio_postgres psql -U operio -d operio_db -c "\dt"` çıktısında `modules`, `institution_modules`, `controllable_devices` listelenir.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add migrations/001_init.sql tests/integration/schema.devicemodule.test.js
+git add migrations/001_init.sql
 git commit -m "feat(db): add modules, institution_modules, controllable_devices tables"
 ```
 
@@ -139,28 +120,30 @@ git commit -m "feat(db): add modules, institution_modules, controllable_devices 
 
 ## Task 2: `requireModule` middleware
 
+> **Not (tekrar düzeltildi — karar gerekçesi ledger'da):** Doğrudan `db.query` mock'lamak (bir önceki düzeltme) bu projede çalışmıyor — `tests/setup.js`'in global mock'u sadece ESM `import` yoluna giren erişimleri yakalıyor, bu projedeki (ve bu planın yazacağı) tüm kod `require()` kullandığı için hiçbir servis/middleware'in `db.query`'si doğrudan mock'lanamıyor (gerçek bir denemeyle doğrulandı — mock'suz gerçek `pg.Pool`'a düşüp bağlantı hatası alındı). Bu yüzden `requireModule`, mevcut kodda zaten tek **gerçekten çalışan** mock yolunu — `_registry` üzerinden bütün bir servisi sahteleştirmeyi (`surgery.test.js`'teki desen) — kullanacak: kendi `db.query`'sini çağırmak yerine `module.service.js`'teki `hasActiveModule`'ü çağırır.
+
 **Files:**
 - Create: `operio-backend/operio-backend/src/middleware/requireModule.js`
+- Create: `operio-backend/operio-backend/src/services/module.service.js` (sadece `hasActiveModule` ile — Task 3 aynı dosyaya `getModules`/`getInstitutionModules`/`purchaseModule`'ü ekleyerek genişletecek)
 - Test: `operio-backend/operio-backend/tests/unit/requireModule.test.js`
 
 **Interfaces:**
-- Consumes: `req.user.institutionId` (authenticate middleware'den sonra dolu), `db.query` (`src/utils/db.js`).
-- Produces: `requireModule(slug: string) => (req, res, next) => void`. Sonraki task'larda `device.routes.js` tarafından `authenticate` sonrası kullanılır.
+- Consumes: `req.user.institutionId`, `registry.get('module', () => require('../services/module.service'))` (`surgery.routes.js`'teki `getService()` deseniyle aynı).
+- Produces: `requireModule(slug: string) => (req, res, next) => void`. `module.service.js` → `hasActiveModule({ institutionId, slug }) => Promise<boolean>` (Task 3, 8 bu fonksiyonu/dosyayı kullanır/genişletir).
 
 - [ ] **Step 1: Başarısız testi yaz**
 
 ```js
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-vi.mock('../../src/utils/db.js', () => ({ default: { query: vi.fn() } }));
-const db = (await import('../../src/utils/db.js')).default;
+import registry from '../../src/services/_registry.js';
 const { requireModule } = await import('../../src/middleware/requireModule.js');
 
-describe('requireModule', () => {
-  beforeEach(() => vi.clearAllMocks());
+const mockModuleService = { hasActiveModule: vi.fn() };
+beforeEach(() => { vi.clearAllMocks(); registry.register('module', mockModuleService); });
 
+describe('requireModule', () => {
   it('kurum modülü almışsa next() çağırmalı', async () => {
-    db.query.mockResolvedValueOnce({ rows: [{ status: 'active' }] });
+    mockModuleService.hasActiveModule.mockResolvedValueOnce(true);
     const req = { user: { institutionId: 'inst-1' } };
     const next = vi.fn();
     await requireModule('voice_control')(req, {}, next);
@@ -168,7 +151,7 @@ describe('requireModule', () => {
   });
 
   it('kurum modülü almamışsa 403 dönmeli', async () => {
-    db.query.mockResolvedValueOnce({ rows: [] });
+    mockModuleService.hasActiveModule.mockResolvedValueOnce(false);
     const req = { user: { institutionId: 'inst-1' } };
     const json = vi.fn();
     const res = { status: vi.fn(() => ({ json })) };
@@ -182,23 +165,25 @@ describe('requireModule', () => {
 
 - [ ] **Step 2: Testi çalıştır, başarısız olduğunu doğrula**
 
-Run: `npm run test:unit -- requireModule`
+Run: `npm run test:unit`
 Expected: FAIL — `src/middleware/requireModule.js` bulunamadı
 
-- [ ] **Step 3: `requireModule(slug)` fonksiyonunu yaz**
+- [ ] **Step 3: `module.service.js`'i `hasActiveModule` ile oluştur; `requireModule(slug)`'ı yaz**
 
-`src/middleware/requireModule.js` — `src/middleware/auth.js`'teki `authorize()` ile aynı üslupta: `institution_modules`'ta `institution_id=$1 AND module_slug=$2 AND status='active'` sorgusu çalıştırır; satır yoksa `forbidden(res, 'Bu modül satın alınmamış')` (`utils/response.js`'ten), varsa `next()`.
+`module.service.js`: `async function hasActiveModule({ institutionId, slug }) { const { rows } = await db.query("SELECT 1 FROM institution_modules WHERE institution_id=$1 AND module_slug=$2 AND status='active'", [institutionId, slug]); return rows.length > 0; }` (düz üst seviye `require('../utils/db')` — bu fonksiyonun SQL'i birim testi almaz, bkz. yukarıdaki not; Task 8'in rota testinde registry üzerinden mock'lanarak dolaylı doğrulanır, gerçek davranışı istenirse Task 1'deki gibi `docker exec psql` ile elle kontrol edilebilir).
+
+`requireModule.js`: `src/middleware/auth.js`'teki `authorize()` ile aynı üslupta, `registry.get('module', ...)` ile servisi al, `hasActiveModule({ institutionId: req.user.institutionId, slug })` çağır; `false` ise `forbidden(res, 'Bu modül satın alınmamış')`, `true` ise `next()`. Beklenmeyen hatayı `next(err)` ile ilet.
 
 - [ ] **Step 4: Testi çalıştır, geçtiğini doğrula**
 
-Run: `npm run test:unit -- requireModule`
-Expected: PASS
+Run: `npm run test:unit`
+Expected: PASS (tüm paket + yeni 2 test)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/middleware/requireModule.js tests/unit/requireModule.test.js
-git commit -m "feat(auth): add requireModule entitlement middleware"
+git add src/middleware/requireModule.js src/services/module.service.js tests/unit/requireModule.test.js
+git commit -m "feat(auth): add requireModule entitlement middleware (via module.service)"
 ```
 
 ---
@@ -206,13 +191,13 @@ git commit -m "feat(auth): add requireModule entitlement middleware"
 ## Task 3: `module.service.js` ve satın alma uçları
 
 **Files:**
-- Create: `operio-backend/operio-backend/src/services/module.service.js`
+- Modify: `operio-backend/operio-backend/src/services/module.service.js` (Task 2'de `hasActiveModule` ile oluşturuldu — bu task aynı dosyaya ekler)
 - Modify: `operio-backend/operio-backend/src/routes/billing.routes.js`
 - Test: `operio-backend/operio-backend/tests/integration/module.test.js`
 
 **Interfaces:**
-- Consumes: `db.query` (`utils/db.js`), `payment.provider.js`'teki mevcut `iyzico`/`stripe` yardımcıları (sadece referans olarak çağrılır — gerçek ödeme entegrasyonunun detayları builder'a bırakılmıştır, bu task sadece DB satırını oluşturur ve var olan sağlayıcı fonksiyonunu **çağırmadan** stub bir "purchased" kaydı açar; gerçek ödeme akışı mevcut `subscription.service.js`'teki desenle aynı şekilde ayrı bir iştir).
-- Produces: `module.service.js` → `{ getModules, getInstitutionModules, purchaseModule({ institutionId, slug }) }`. `billing.routes.js`'e eklenen `GET /api/billing/modules`, `GET /api/billing/modules/mine`, `POST /api/billing/modules/:slug/purchase`.
+- Consumes: `db.query` (`utils/db.js` — bu task'ın eklediği fonksiyonların SQL'i, Task 2'deki `hasActiveModule` gibi birim testi almaz, bkz. Task 2'nin notu), `payment.provider.js`'teki mevcut `iyzico`/`stripe` yardımcıları (sadece referans olarak çağrılır — gerçek ödeme entegrasyonunun detayları builder'a bırakılmıştır, bu task sadece DB satırını oluşturur ve var olan sağlayıcı fonksiyonunu **çağırmadan** stub bir "purchased" kaydı açar; gerçek ödeme akışı mevcut `subscription.service.js`'teki desenle aynı şekilde ayrı bir iştir).
+- Produces: `module.service.js`'e eklenir → `{ getModules, getInstitutionModules, purchaseModule({ institutionId, slug }) }` (mevcut `hasActiveModule`'ün yanına). `billing.routes.js`'e eklenen `GET /api/billing/modules`, `GET /api/billing/modules/mine`, `POST /api/billing/modules/:slug/purchase`.
 
 - [ ] **Step 1: Başarısız entegrasyon testini yaz**
 
@@ -365,70 +350,27 @@ git commit -m "feat(devices): add DeviceDriver abstraction and MockDriver"
 
 ## Task 5: `device.service.js` — CRUD
 
+> **Not (karar: ledger'da Task 2 ile aynı gerekçe):** `db.query`'yi doğrudan mock'layan bir birim testi bu projede çalışmaz (bkz. Task 2'nin notu). Bu task'ın CRUD fonksiyonları, bu codebase'teki **her** servis gibi (`room.service.js`, `surgery.service.js` dahil — hiçbirinin doğrudan SQL birim testi yok), birim testi almaz; doğruluğu Task 8'in `_registry`-mock'lu rota testinde ve istenirse Task 1'deki gibi gerçek `operio_postgres`'e karşı elle doğrulanır. Bu task'ta TDD adımı yok — bu, planın geri kalanındaki tek TDD'siz görev; sebebi yukarıdaki not.
+
 **Files:**
 - Create: `operio-backend/operio-backend/src/services/device.service.js`
-- Test: `operio-backend/operio-backend/tests/integration/device.service.test.js`
 
 **Interfaces:**
 - Consumes: `db.query` (`utils/db.js`), `audit` (`utils/audit.js`).
 - Produces: `{ listDevices({ institutionId, roomId }), getDevice({ id, institutionId }), createDevice({ data, institutionId, userId, req }), updateDeviceConfig({ id, data, institutionId, userId, req }) }`. Task 6/7/8 bu modülü genişletir (aynı dosyaya eklenir).
 
-- [ ] **Step 1: Başarısız testi yaz**
+- [ ] **Step 1: CRUD fonksiyonlarını yaz**
 
-```js
-import { describe, it, expect, beforeEach } from 'vitest';
-import db from '../../src/utils/db.js';
-const svc = await import('../../src/services/device.service.js');
+`room.service.js`'teki desenle birebir aynı (ham SQL, `audit()` çağrısı her create/update'te): `listDevices` → `SELECT * FROM controllable_devices WHERE institution_id=$1 AND ($2::uuid IS NULL OR room_id=$2)`. `getDevice` → `SELECT * ... WHERE id=$1 AND institution_id=$2`, `rows[0] || null`. `createDevice` → `INSERT INTO controllable_devices (institution_id, room_id, name, device_group, device_type, driver_key, requires_physical_confirm) VALUES (...) RETURNING *`, ardından `audit({ userId, action:'CREATE', resource:'controllable_devices', resourceId: device.id, newData: data, req })`. `updateDeviceConfig` → `UPDATE controllable_devices SET driver_key=$1, mode=$2, updated_at=NOW() WHERE id=$3 AND institution_id=$4 RETURNING *`, ardından `audit({ userId, action:'UPDATE', ... })`.
 
-describe('device.service — CRUD', () => {
-  const institutionId = 'test-inst-device-crud';
+- [ ] **Step 2: Gerçek dev Postgres'e karşı elle doğrula (opsiyonel ama önerilir)**
 
-  beforeEach(async () => {
-    await db.query(`INSERT INTO institutions (id, name) VALUES ($1,'Test') ON CONFLICT (id) DO NOTHING`, [institutionId]);
-  });
+Run: `docker compose restart api` (backend container'ını yeniden başlatıp yeni kodu yükle), sonra `curl -X POST http://localhost:4000/api/devices -H "Authorization: Bearer <admin-token>" -H "Content-Type: application/json" -d '{"name":"Test Cihaz","deviceGroup":"light","deviceType":"or_light"}'` (bu uç Task 8'de açılacak — bu adım Task 8 tamamlanana kadar atlanabilir, o zaman geriye dönük çalıştırılır).
 
-  it('createDevice sonrası getDevice aynı kaydı dönmeli', async () => {
-    const created = await svc.createDevice({
-      data: { name: 'Elektrokoter Test', deviceGroup: 'electrosurgery', deviceType: 'cautery' },
-      institutionId, userId: 'u1', req: {},
-    });
-    const fetched = await svc.getDevice({ id: created.id, institutionId });
-    expect(fetched.name).toBe('Elektrokoter Test');
-    expect(fetched.mode).toBe('SIM');
-  });
-
-  it('updateDeviceConfig driver_key/mode güncelleyebilmeli', async () => {
-    const created = await svc.createDevice({
-      data: { name: 'Test2', deviceGroup: 'light', deviceType: 'or_light' },
-      institutionId, userId: 'u1', req: {},
-    });
-    const updated = await svc.updateDeviceConfig({
-      id: created.id, institutionId, userId: 'u1', req: {},
-      data: { driverKey: 'mock', mode: 'SIM' },
-    });
-    expect(updated.driver_key).toBe('mock');
-  });
-});
-```
-
-- [ ] **Step 2: Testi çalıştır, başarısız olduğunu doğrula**
-
-Run: `npm run test:integration -- device.service.test`
-Expected: FAIL — `src/services/device.service.js` yok
-
-- [ ] **Step 3: CRUD fonksiyonlarını yaz**
-
-`room.service.js`'teki desenle aynı (ham SQL, `audit()` çağrısı her create/update'te). `createDevice`/`updateDeviceConfig` sonunda `audit({ userId, action:'CREATE'|'UPDATE', resource:'controllable_devices', resourceId, newData, req })`.
-
-- [ ] **Step 4: Testi çalıştır, geçtiğini doğrula**
-
-Run: `npm run test:integration -- device.service.test`
-Expected: PASS
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add src/services/device.service.js tests/integration/device.service.test.js
+git add src/services/device.service.js
 git commit -m "feat(devices): add controllable_devices CRUD service"
 ```
 
@@ -506,94 +448,82 @@ git commit -m "feat(devices): add room+role+team_role tiered authorization check
 
 ## Task 7: `executeCommand` + `physicalConfirm`
 
+> **Not (karar: ledger'da — db.query mock'lanamadığı için mimari değişti):** `db.query`'yi doğrudan mock'layan bir birim testi bu projede çalışmaz (bkz. Task 2'nin notu). Bu riski ortadan kaldırmak için, bu task'ın en kritik parçası — yetkilendirme + fiziksel-onay kapısı kararı — **saf bir fonksiyona** (`decideCommand`, hiç db çağırmaz) ayrıştırılıyor ve TDD ile tam kapsamlı test ediliyor. `executeCommand`/`physicalConfirm` (db'ye dokunan ince orkestrasyon) bu saf fonksiyonu çağırır ama kendisi birim testi almaz — tıpkı `device.service.js`'in diğer fonksiyonları gibi (Task 5'in notu), doğruluğu Task 8'in rota testinde ve/veya gerçek DB'ye karşı elle doğrulanır.
+
 **Files:**
 - Modify: `operio-backend/operio-backend/src/services/device.service.js`
 - Modify: `operio-backend/operio-backend/src/socket.js` (EVENTS'e `DEVICE_STATUS_CHANGED` ekle)
-- Test: `operio-backend/operio-backend/tests/integration/deviceCommand.test.js`
+- Test: `operio-backend/operio-backend/tests/unit/decideCommand.test.js`
 
 **Interfaces:**
-- Consumes: `getDriver` (`drivers/registry.js`), `checkDeviceAuthorization` (Task 6), `audit`, `emitToInstitution`/`EVENTS` (`socket.js`), ayrıca aktif oda/ekip bilgisini çekmek için yeni bir yardımcı sorgu (bu task içinde yazılır): `getActiveAssignment({ userId, institutionId }) => { roomId, teamRole } | null` (kullanıcının o an `IN_PROGRESS` bir `surgery_teams` kaydı var mı).
-- Produces: `executeCommand({ deviceId, institutionId, userId, action, value, req }) => device` (action: `'turn_on'|'turn_off'|'set_power'|'arm_move'|'invoke_action'`). `physicalConfirm({ deviceId, institutionId, userId, req }) => device`. Task 8 (route'lar) bunları çağırır.
+- Consumes: `checkDeviceAuthorization` (Task 6, `decideCommand` içeriden çağırır).
+- Produces:
+  - `decideCommand({ user, device, activeRoomId, teamRole, action }) => void` — saf fonksiyon, izin yoksa veya `requires_physical_confirm` ihlal ediliyorsa `throw new Error(reason)` yapar (reason: `checkDeviceAuthorization`'ınkiyle aynı + `'physical_confirm_required'`), aksi halde sessizce döner (izin var demektir). DB'ye, driver'a, audit'e, socket'e hiç dokunmaz.
+  - `executeCommand({ deviceId, institutionId, userId, action, value, req }) => device` — cihazı + aktif atamayı (`getActiveAssignment`, bu task içinde yazılır: `surgery_teams` JOIN `surgeries` WHERE `user_id=$1 AND status='IN_PROGRESS'`) çeker, `decideCommand`'ı çağırır (reddederse hatayı yukarı fırlatır), `getDriver(device)` ile ilgili metodu çağırır, DB'yi günceller, `audit`/`emitToInstitution` çağırır, güncel cihazı döner.
+  - `physicalConfirm({ deviceId, institutionId, userId, req }) => device` — cihazı çeker, `power_state !== 'ARMED'` ise `throw`, driver'ın `confirmPhysical()`'ını çağırıp günceller/loglar/yayınlar.
+  - Task 8 (route'lar) `executeCommand`/`physicalConfirm`'ı çağırır.
 
-- [ ] **Step 1: Başarısız testi yaz**
+- [ ] **Step 1: `decideCommand` için başarısız testi yaz**
 
 ```js
-import { describe, it, expect, beforeEach } from 'vitest';
-import db from '../../src/utils/db.js';
-const svc = await import('../../src/services/device.service.js');
+import { describe, it, expect } from 'vitest';
+const { decideCommand } = await import('../../src/services/device.service.js');
 
-describe('device.service — executeCommand', () => {
-  const institutionId = 'test-inst-cmd';
-  let roomId, surgeryId, device;
+const cauteryDevice = { id: 'd1', room_id: 'room-1', device_group: 'electrosurgery', requires_physical_confirm: false, capabilities: { requiredTeamRoles: ['cerrah'] } };
+const tableDevice   = { id: 'd2', room_id: 'room-1', device_group: 'table', requires_physical_confirm: true, capabilities: {} };
 
-  beforeEach(async () => {
-    await db.query(`INSERT INTO institutions (id, name) VALUES ($1,'Test') ON CONFLICT (id) DO NOTHING`, [institutionId]);
-    const room = await db.query(`INSERT INTO operating_rooms (institution_id, name, room_number) VALUES ($1,'Salon T',99) RETURNING id`, [institutionId]);
-    roomId = room.rows[0].id;
-    const surgery = await db.query(
-      `INSERT INTO surgeries (institution_id, room_id, title, status) VALUES ($1,$2,'Test Op','IN_PROGRESS') RETURNING id`,
-      [institutionId, roomId]
-    );
-    surgeryId = surgery.rows[0].id;
-    await db.query(`INSERT INTO surgery_teams (surgery_id, user_id, team_role) VALUES ($1,$2,'cerrah')`, [surgeryId, 'user-cerrah']);
-    device = await svc.createDevice({
-      data: { name: 'Koter', deviceGroup: 'electrosurgery', deviceType: 'cautery', roomId },
-      institutionId, userId: 'admin', req: {},
-    });
+describe('decideCommand', () => {
+  it('yetkili cerrah + turn_on → izin verilmeli (fırlatmamalı)', () => {
+    expect(() => decideCommand({
+      user: { roleId: 6 }, device: cauteryDevice, activeRoomId: 'room-1', teamRole: 'cerrah', action: 'turn_on',
+    })).not.toThrow();
   });
 
-  it('yetkili cerrah → turn_on kabul edilmeli, power_state ON olmalı', async () => {
-    const updated = await svc.executeCommand({
-      deviceId: device.id, institutionId, userId: 'user-cerrah', action: 'turn_on', req: {},
-    });
-    expect(updated.power_state).toBe('ON');
+  it('ekipte olmayan biri (activeRoomId uyuşmuyor) → reddedilmeli', () => {
+    expect(() => decideCommand({
+      user: { roleId: 6 }, device: cauteryDevice, activeRoomId: null, teamRole: null, action: 'turn_on',
+    })).toThrow();
   });
 
-  it('ekipte olmayan biri → reddedilmeli (hata fırlatmalı)', async () => {
-    await expect(svc.executeCommand({
-      deviceId: device.id, institutionId, userId: 'user-yabanci', action: 'turn_on', req: {},
-    })).rejects.toThrow();
+  it('elektrocerrahi: team_role cerrah değilse → reddedilmeli', () => {
+    expect(() => decideCommand({
+      user: { roleId: 4 }, device: cauteryDevice, activeRoomId: 'room-1', teamRole: 'hemsire', action: 'turn_on',
+    })).toThrow();
   });
 
-  it('requires_physical_confirm=true cihazda turn_on denenirse reddedilmeli, sadece arm_move kabul', async () => {
-    const tableDevice = await svc.createDevice({
-      data: { name: 'Masa', deviceGroup: 'table', deviceType: 'or_table', roomId, requiresPhysicalConfirm: true },
-      institutionId, userId: 'admin', req: {},
-    });
-    await expect(svc.executeCommand({
-      deviceId: tableDevice.id, institutionId, userId: 'user-cerrah', action: 'turn_on', req: {},
-    })).rejects.toThrow();
+  it('requires_physical_confirm=true cihazda turn_on → reddedilmeli', () => {
+    expect(() => decideCommand({
+      user: { roleId: 6 }, device: tableDevice, activeRoomId: 'room-1', teamRole: 'cerrah', action: 'turn_on',
+    })).toThrow(/physical_confirm_required/);
+  });
 
-    const armed = await svc.executeCommand({
-      deviceId: tableDevice.id, institutionId, userId: 'user-cerrah', action: 'arm_move', value: 'yatir', req: {},
-    });
-    expect(armed.power_state).toBe('ARMED');
-
-    const confirmed = await svc.physicalConfirm({ deviceId: tableDevice.id, institutionId, userId: 'user-cerrah', req: {} });
-    expect(confirmed.power_state).toBe('ON');
+  it('requires_physical_confirm=true cihazda arm_move → izin verilmeli', () => {
+    expect(() => decideCommand({
+      user: { roleId: 6 }, device: tableDevice, activeRoomId: 'room-1', teamRole: 'cerrah', action: 'arm_move',
+    })).not.toThrow();
   });
 });
 ```
 
 - [ ] **Step 2: Testi çalıştır, başarısız olduğunu doğrula**
 
-Run: `npm run test:integration -- deviceCommand.test`
-Expected: FAIL
+Run: `npm run test:unit`
+Expected: FAIL — `decideCommand` yok
 
-- [ ] **Step 3: `getActiveAssignment`, `executeCommand`, `physicalConfirm`'ı yaz; `socket.js`'e event ekle**
+- [ ] **Step 3: `decideCommand`'ı yaz; ardından `getActiveAssignment`, `executeCommand`, `physicalConfirm`'ı ekle; `socket.js`'e event ekle**
 
-`socket.js`'teki `EVENTS` nesnesine `DEVICE_STATUS_CHANGED: 'device:status_changed'` ekle. `executeCommand`: cihazı çek → `getActiveAssignment` ile oda/takım-rolünü çek → `checkDeviceAuthorization` çağır, reddedilirse `throw` (mesajda `reason`) → `requires_physical_confirm && action !== 'arm_move'` ise reddet → `getDriver(device)` ile ilgili metodu çağır → DB'de `power_state`/`power_level` güncelle → `audit({ action:'device:command', resource:'controllable_devices', resourceId: deviceId, newData:{ action, value, driverKey: device.driver_key } })` → `emitToInstitution(institutionId, EVENTS.DEVICE_STATUS_CHANGED, { device })` → güncel cihazı döndür. `physicalConfirm`: cihaz `ARMED` değilse `throw`; driver'ın `confirmPhysical()`'ını çağır, aynı şekilde güncelle/logla/yayınla.
+`decideCommand`: `checkDeviceAuthorization({ user, device, activeRoomId, teamRole })` çağır, `!allowed` ise `throw new Error(reason)`; sonra `device.requires_physical_confirm && action !== 'arm_move'` ise `throw new Error('physical_confirm_required')`. `socket.js`'teki `EVENTS`'e `DEVICE_STATUS_CHANGED: 'device:status_changed'` ekle. `executeCommand`/`physicalConfirm`: Task 5'in notundaki gibi (üst seviye `require('../utils/db')`), `decideCommand`'ı çağırdıktan sonra `getDriver(device)[action'a karşılık gelen metot]` çağırıp DB'yi güncelle, `audit(...)`, `emitToInstitution(...)`. Bu iki fonksiyon kendileri test edilmiyor (yukarıdaki not) — `decideCommand`'ı doğru çağırmaları Task 8'in rota testinde dolaylı doğrulanır.
 
 - [ ] **Step 4: Testi çalıştır, geçtiğini doğrula**
 
-Run: `npm run test:integration -- deviceCommand.test`
+Run: `npm run test:unit`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/services/device.service.js src/socket.js tests/integration/deviceCommand.test.js
-git commit -m "feat(devices): add executeCommand/physicalConfirm with room+role+team authorization"
+git add src/services/device.service.js src/socket.js tests/unit/decideCommand.test.js
+git commit -m "feat(devices): add decideCommand (pure authorization gate) + executeCommand/physicalConfirm"
 ```
 
 ---
@@ -620,7 +550,7 @@ import registry from '../../src/services/_registry.js';
 import app from '../../src/app.js';
 
 const request = supertest(app);
-const mockModuleService = { getModules: vi.fn(), getInstitutionModules: vi.fn().mockResolvedValue([{ module_slug: 'voice_control', status: 'active' }]) };
+const mockModuleService = { getModules: vi.fn(), getInstitutionModules: vi.fn(), hasActiveModule: vi.fn().mockResolvedValue(true) };
 const mockDeviceService = { listDevices: vi.fn(), getDevice: vi.fn(), createDevice: vi.fn(), updateDeviceConfig: vi.fn(), executeCommand: vi.fn(), physicalConfirm: vi.fn() };
 const tok = (roleId) => signAccessToken({ sub: 'u1', email: 'e@t.com', roleId, institutionId: 'inst-1' });
 
@@ -632,7 +562,7 @@ beforeEach(() => {
 
 describe('GET /api/devices', () => {
   it('modül satın alınmamışsa 403', async () => {
-    mockModuleService.getInstitutionModules.mockResolvedValueOnce([]);
+    mockModuleService.hasActiveModule.mockResolvedValueOnce(false);
     const res = await request.get('/api/devices').set('Authorization', `Bearer ${tok(6)}`);
     expect(res.status).toBe(403);
   });
@@ -698,72 +628,59 @@ git commit -m "feat(devices): wire /api/devices routes with module gate and auth
 
 ## Task 9: ARMED cihazların ameliyat bitince otomatik geri alınması
 
+> **Not (karar: ledger'da — aynı db-mock kısıtı):** `db.query`'yi doğrudan mock'layan bir birim testi bu projede çalışmaz (bkz. Task 2'nin notu). Bu yüzden "ne zaman geri alınmalı" kararı, saf bir fonksiyona (`shouldRevertArmedDevices`) ayrıştırılıp TDD ile test ediliyor; asıl `UPDATE controllable_devices` çağrısının kendisi (Task 5/7'deki gibi) birim testi almıyor.
+
 **Files:**
 - Modify: `operio-backend/operio-backend/src/services/surgery.service.js`
-- Test: `operio-backend/operio-backend/tests/integration/armedRevert.test.js`
+- Test: `operio-backend/operio-backend/tests/unit/shouldRevertArmedDevices.test.js`
 
 **Interfaces:**
-- Consumes: `updateSurgery` (mevcut `surgery.service.js` fonksiyonu — bu task onu değiştirir).
-- Produces: `updateSurgery` artık, `status` `IN_PROGRESS`'ten başka bir şeye değişirse, o `room_id`'deki tüm `ARMED` cihazları `OFF`'a çeken bir yan etki içerir (yeni bir dışa açık fonksiyon gerekmez — mevcut fonksiyonun davranışı genişler).
+- Consumes: `updateSurgery` (mevcut `surgery.service.js` fonksiyonu — bu task onu değiştirir, içeride yeni saf fonksiyonu çağırır).
+- Produces: `shouldRevertArmedDevices(oldStatus, newStatus) => boolean` (saf fonksiyon, `surgery.service.js`'e eklenir, dışa aktarılır). `updateSurgery` artık, bu `true` dönerse o `room_id`'deki tüm `ARMED` cihazları `OFF`'a çeken bir yan etki içerir. (Task 7'deki "physicalConfirm: ARMED olmayan cihazda reddedilmeli" testi, geri alma sonrası davranışı zaten kapsıyor — burada tekrarlanmaz.)
 
 - [ ] **Step 1: Başarısız testi yaz**
 
 ```js
-import { describe, it, expect, beforeEach } from 'vitest';
-import db from '../../src/utils/db.js';
-const surgerySvc = await import('../../src/services/surgery.service.js');
-const deviceSvc  = await import('../../src/services/device.service.js');
+import { describe, it, expect } from 'vitest';
+const { shouldRevertArmedDevices } = await import('../../src/services/surgery.service.js');
 
-describe('ARMED cihaz otomatik geri alma', () => {
-  const institutionId = 'test-inst-armed';
-  let roomId, surgeryId, tableDevice;
-
-  beforeEach(async () => {
-    await db.query(`INSERT INTO institutions (id, name) VALUES ($1,'Test') ON CONFLICT (id) DO NOTHING`, [institutionId]);
-    const room = await db.query(`INSERT INTO operating_rooms (institution_id, name, room_number) VALUES ($1,'Salon A',98) RETURNING id`, [institutionId]);
-    roomId = room.rows[0].id;
-    const surgery = await db.query(`INSERT INTO surgeries (institution_id, room_id, title, status) VALUES ($1,$2,'Op','IN_PROGRESS') RETURNING id`, [institutionId, roomId]);
-    surgeryId = surgery.rows[0].id;
-    await db.query(`INSERT INTO surgery_teams (surgery_id, user_id, team_role) VALUES ($1,'user-cerrah','cerrah')`, [surgeryId]);
-    tableDevice = await deviceSvc.createDevice({
-      data: { name: 'Masa', deviceGroup: 'table', deviceType: 'or_table', roomId, requiresPhysicalConfirm: true },
-      institutionId, userId: 'admin', req: {},
-    });
-    await deviceSvc.executeCommand({ deviceId: tableDevice.id, institutionId, userId: 'user-cerrah', action: 'arm_move', value: 'yatir', req: {} });
+describe('shouldRevertArmedDevices', () => {
+  it('IN_PROGRESS → COMPLETED: true', () => {
+    expect(shouldRevertArmedDevices('IN_PROGRESS', 'COMPLETED')).toBe(true);
   });
-
-  it('ameliyat COMPLETED olunca ARMED cihaz otomatik OFF olmalı', async () => {
-    await surgerySvc.updateSurgery({ id: surgeryId, data: { status: 'COMPLETED' }, institutionId, userId: 'user-cerrah', req: {} });
-    const device = await deviceSvc.getDevice({ id: tableDevice.id, institutionId });
-    expect(device.power_state).toBe('OFF');
+  it('IN_PROGRESS → CANCELLED: true', () => {
+    expect(shouldRevertArmedDevices('IN_PROGRESS', 'CANCELLED')).toBe(true);
   });
-
-  it('bu noktadan sonra physical-confirm çağrısı reddedilmeli', async () => {
-    await surgerySvc.updateSurgery({ id: surgeryId, data: { status: 'COMPLETED' }, institutionId, userId: 'user-cerrah', req: {} });
-    await expect(deviceSvc.physicalConfirm({ deviceId: tableDevice.id, institutionId, userId: 'user-cerrah', req: {} }))
-      .rejects.toThrow();
+  it('IN_PROGRESS → IN_PROGRESS (değişmedi): false', () => {
+    expect(shouldRevertArmedDevices('IN_PROGRESS', 'IN_PROGRESS')).toBe(false);
+  });
+  it('WAITING → PREPARING (zaten IN_PROGRESS değildi): false', () => {
+    expect(shouldRevertArmedDevices('WAITING', 'PREPARING')).toBe(false);
+  });
+  it('newStatus tanımsızsa (bu alan güncellenmemiş): false', () => {
+    expect(shouldRevertArmedDevices('IN_PROGRESS', undefined)).toBe(false);
   });
 });
 ```
 
 - [ ] **Step 2: Testi çalıştır, başarısız olduğunu doğrula**
 
-Run: `npm run test:integration -- armedRevert.test`
-Expected: FAIL
+Run: `npm run test:unit`
+Expected: FAIL — fonksiyon yok
 
-- [ ] **Step 3: `surgery.service.js`'teki `updateSurgery`'yi genişlet**
+- [ ] **Step 3: `shouldRevertArmedDevices`'ı yaz; `updateSurgery`'yi genişlet**
 
-`status` eski değerden `'IN_PROGRESS'` idi ve yeni değer `'IN_PROGRESS'` değilse: `UPDATE controllable_devices SET power_state='OFF', power_level=0 WHERE room_id=$1 AND power_state='ARMED'` çalıştır (döngüsel bağımlılığı önlemek için `device.service.js`'i import etmek yerine doğrudan SQL ile; `device.service.js`'teki driver soyutlamasını atlamak burada kasıtlı — bu bir güvenlik temizliği, cihazın kendi "kapatma" mantığından bağımsız olmalı).
+`shouldRevertArmedDevices(oldStatus, newStatus) { return oldStatus === 'IN_PROGRESS' && newStatus != null && newStatus !== 'IN_PROGRESS'; }`. `updateSurgery` içinde, surgery UPDATE'inden hemen sonra: `if (shouldRevertArmedDevices(old.status, surgery.status)) await db.query("UPDATE controllable_devices SET power_state='OFF', power_level=0 WHERE room_id=$1 AND power_state='ARMED'", [old.room_id]);` (döngüsel bağımlılığı önlemek için `device.service.js`'i import etmek yerine doğrudan SQL ile; bu kasıtlı — cihazın kendi driver/soyutlama mantığından bağımsız bir güvenlik temizliği).
 
 - [ ] **Step 4: Testi çalıştır, geçtiğini doğrula**
 
-Run: `npm run test:integration -- armedRevert.test`
+Run: `npm run test:unit`
 Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/services/surgery.service.js tests/integration/armedRevert.test.js
+git add src/services/surgery.service.js tests/unit/shouldRevertArmedDevices.test.js
 git commit -m "fix(devices): auto-revert ARMED devices when surgery leaves IN_PROGRESS"
 ```
 
