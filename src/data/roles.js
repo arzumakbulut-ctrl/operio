@@ -12,6 +12,7 @@ export const ROLES = [
         { ic: 'hosp',  lbl: 'Kurum Yönetimi',         path: '/kurum' },
         { ic: 'room',  lbl: 'Salon Yönetimi',         path: '/salonlar' },
         { ic: 'cal',   lbl: 'Doluluk Takvimi',        path: '/takvim' },
+        { ic: 'dev',   lbl: 'Cihaz Kontrolü',         path: '/cihaz-kontrol' },
       ]},
       { sec: 'Kullanıcılar', items: [
         { ic: 'users', lbl: 'Doktor Yönetimi',        path: '/doktorlar' },
@@ -72,6 +73,7 @@ export const ROLES = [
       ]},
       { sec: 'Ekipman', items: [
         { ic: 'dev',   lbl: 'Cihaz Envanteri',        path: '/envanter' },
+        { ic: 'dev',   lbl: 'Cihaz Kontrolü',         path: '/cihaz-kontrol' },
         { ic: 'set',   lbl: 'Cerrahi Setler',         path: '/steril-setler' },
       ]},
       { sec: 'Eğitim', items: [
@@ -97,6 +99,7 @@ export const ROLES = [
       { sec: 'Ameliyathane', items: [
         { ic: 'dash',  lbl: 'Ameliyat Listesi',       path: '/ameliyatlar' },
         { ic: 'ane',   lbl: 'Ekip Planı',             path: '/ekip' },
+        { ic: 'dev',   lbl: 'Cihaz Kontrolü',         path: '/cihaz-kontrol' },
         { ic: 'doc',   lbl: 'Tıbbi Sözlük',           path: '/sozluk' },
         { ic: 'proc',  lbl: 'İlaç Rehberi',           path: '/ilac-rehberi' },
       ]},
@@ -129,6 +132,7 @@ export const ROLES = [
         { ic: 'dash',  lbl: 'Ameliyat Listem',        path: '/ameliyatlar' },
         { ic: 'cal',   lbl: 'Çalışma Listem',         path: '/calisma' },
         { ic: 'equip', lbl: 'Cihaz Envanteri',        path: '/envanter' },
+        { ic: 'dev',   lbl: 'Cihaz Kontrolü',         path: '/cihaz-kontrol' },
       ]},
       { sec: 'Eğitim', items: [
         { ic: 'cal',   lbl: 'Eğitim Takvimi',         path: '/egitim-takvim' },
@@ -151,6 +155,7 @@ export const ROLES = [
         { ic: 'dash',  lbl: 'Ameliyat Listem',        path: '/ameliyatlar' },
         { ic: 'set',   lbl: 'Vaka Hazırlığı',         path: '/vaka' },
         { ic: 'doc',   lbl: 'Sayım Formu',            path: '/sayim' },
+        { ic: 'dev',   lbl: 'Cihaz Kontrolü',         path: '/cihaz-kontrol' },
         { ic: 'cal',   lbl: 'Çalışma Listem',         path: '/calisma' },
       ]},
       { sec: 'Eğitim', items: [
@@ -174,6 +179,7 @@ export const ROLES = [
         { ic: 'dash',  lbl: 'Ameliyat Listesi',       path: '/ameliyatlar' },
         { ic: 'cal',   lbl: 'Çalışma Listem',         path: '/calisma' },
         { ic: 'dev',   lbl: 'Cihaz Envanteri',        path: '/envanter' },
+        { ic: 'dev',   lbl: 'Cihaz Kontrolü',         path: '/cihaz-kontrol' },
       ]},
       { sec: 'Eğitim', items: [
         { ic: 'cal',   lbl: 'Eğitim Takvimi',         path: '/egitim-takvim' },
@@ -195,6 +201,7 @@ export const ROLES = [
         { ic: 'plus',  lbl: 'Ameliyat Talebi',        path: '/talep' },
         { ic: 'cal',   lbl: 'Randevu Durumlarım',     path: '/randevu' },
         { ic: 'proc',  lbl: 'Örnek İstemleri',        path: '/ornek-istemi' },
+        { ic: 'dev',   lbl: 'Cihaz Kontrolü',         path: '/cihaz-kontrol' },
       ]},
       { sec: 'Hastalarım', items: [
         { ic: 'pat',   lbl: 'Hasta Kayıtları',        path: '/hastalar' },
