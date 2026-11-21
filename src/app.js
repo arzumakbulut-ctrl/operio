@@ -14,6 +14,7 @@ const notificationRoutes = require('./routes/notification.routes');
 const billingRoutes      = require('./routes/billing.routes');
 const deviceRoutes       = require('./routes/device.routes');
 const kioskAdminRoutes   = require('./routes/kioskAdmin.routes');
+const voiceProfileRoutes = require('./routes/voiceProfile.routes');
 const { patientRouter, roomRouter, setRouter, auditRouter } = require('./routes/other.routes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 
@@ -118,6 +119,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/billing',      billingRoutes);
 app.use('/api/devices',      deviceRoutes);
 app.use('/api/kiosk-admin',  kioskAdminRoutes);
+app.use('/api/profile',      voiceProfileRoutes);
 app.use('/api/ws',            notificationRoutes);
 app.use('/api/ai',          aiRoutes);
 
