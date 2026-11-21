@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useUIStore } from '../store';
+import { moduleAPI } from '../services/api.js';
 
 const BASE = 'http://localhost:4000/api';
 const tok = () => localStorage.getItem('operio_access');
@@ -90,6 +91,45 @@ export default function Abonelik() {
   const [aktifTab, setAktifTab] = useState('genel');
   const [paket,    setPaket]    = useState(INIT_AKTIF_PAKET);
   const [onayModal, setOnayModal] = useState(null); // {mesaj, onOnayla, danger}
+
+  // Kurum bazlı satın alınabilir eklenti modülleri (ör. Sesli Cihaz Kontrolü) —
+  // yukarıdaki OPERIO_MODULLER'dan ayrı bir kavram: OPERIO_MODULLER plan içinde
+  // gösterim amaçlı sabit bir liste, bunlar ise institution_modules tablosuna
+  // karşılık gelen, gerçekten satın alınıp alınmadığı backend'ce denetlenen
+  // (requireModule middleware'iyle kapıya alınan) bağımsız eklentiler.
+  const [eklentiModuller, setEklentiModuller]     = useState([]);
+  const [eklentiSahipSlug, setEklentiSahipSlug]   = useState([]);
+  const [eklentiYukleniyor, setEklentiYukleniyor] = useState(true);
+  const [eklentiAliniyorSlug, setEklentiAliniyorSlug] = useState(null);
+
+  async function eklentiYukle() {
+    setEklentiYukleniyor(true);
+    try {
+      const [list, mine] = await Promise.all([
+        moduleAPI.list().catch(() => []),
+        moduleAPI.mine().catch(() => []),
+      ]);
+      setEklentiModuller(Array.isArray(list) ? list : []);
+      setEklentiSahipSlug(Array.isArray(mine) ? mine.map(m => m.slug) : []);
+    } finally {
+      setEklentiYukleniyor(false);
+    }
+  }
+
+  useEffect(() => { eklentiYukle(); }, []);
+
+  async function eklentiSatinAl(slug) {
+    setEklentiAliniyorSlug(slug);
+    try {
+      await moduleAPI.purchase(slug);
+      showToast('Modül satın alındı');
+      await eklentiYukle();
+    } catch (e) {
+      showToast('⚠️ Modül satın alınamadı');
+    } finally {
+      setEklentiAliniyorSlug(null);
+    }
+  }
 
   useEffect(() => {
     const h = { Authorization: `Bearer ${tok()}` };
@@ -365,6 +405,59 @@ export default function Abonelik() {
                 <div style={{fontSize:'10.5px',color:'var(--slate-light)',marginTop:1}}>{paket.moduller.length} aktif modül</div>
               </div>
               <div style={{fontSize:18,fontWeight:900,color:'#7C3AED',fontFamily:"'Outfit',sans-serif"}}>{fmtTL(toplamModul)}/ay</div>
+            </div>
+
+            {/* Eklenti Modülleri — kurum bazlı, moduleAPI üzerinden gerçek satın alma */}
+            <div className="an-section" style={{marginTop:16}}>
+              <div className="an-section-hd" style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <span>🧩 Eklenti Modülleri</span>
+                <span style={{fontSize:10,color:'var(--slate-light)',textTransform:'none',fontWeight:500,letterSpacing:0}}>{eklentiModuller.length} modül</span>
+              </div>
+              <div className="an-section-body">
+                <div style={{fontSize:11,color:'var(--slate-light)',marginBottom:14,lineHeight:1.6}}>
+                  Yukarıdaki modüller plan içindeki özellikleri açar. Aşağıdakiler ise kurumunuz için ayrıca satın alınan,
+                  bağımsız eklentilerdir (örn. Sesli Cihaz Kontrolü) — satın alma durumu sunucu tarafında denetlenir.
+                </div>
+                {eklentiYukleniyor ? (
+                  <div style={{color:'var(--slate-light)',fontSize:13,textAlign:'center',padding:24}}>
+                    Modüller yükleniyor…
+                  </div>
+                ) : eklentiModuller.length > 0 ? (
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill, minmax(220px, 1fr))',gap:12}}>
+                    {eklentiModuller.map(mod => {
+                      const sahip = eklentiSahipSlug.includes(mod.slug);
+                      const satinAliniyor = eklentiAliniyorSlug === mod.slug;
+                      return (
+                        <div key={mod.slug} style={{border:'1px solid var(--border)',borderRadius:10,padding:16,display:'flex',flexDirection:'column',gap:10}}>
+                          <div style={{fontWeight:700,color:'var(--slate)',fontSize:14}}>{mod.name}</div>
+                          <div style={{fontSize:18,fontWeight:800,color:'var(--slate)',fontFamily:"'Outfit',sans-serif"}}>
+                            ₺{Math.round((mod.price_try || 0) / 100).toLocaleString('tr-TR')}
+                            <span style={{fontSize:11,fontWeight:500,color:'var(--slate-light)'}}> /ay</span>
+                          </div>
+                          {sahip ? (
+                            <span className="tag" style={{background:'rgba(5,150,105,0.1)',color:'var(--success)',alignSelf:'flex-start'}}>
+                              Aktif
+                            </span>
+                          ) : (
+                            <button
+                              className="btn btn-primary btn-sm"
+                              disabled={satinAliniyor}
+                              style={{alignSelf:'flex-start',opacity:satinAliniyor?0.7:1}}
+                              onClick={()=>eklentiSatinAl(mod.slug)}
+                            >
+                              {satinAliniyor ? 'Satın alınıyor…' : 'Satın Al'}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div style={{color:'var(--slate-light)',fontSize:13,textAlign:'center',padding:24}}>
+                    Satın alınabilir eklenti modülü bulunamadı
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
