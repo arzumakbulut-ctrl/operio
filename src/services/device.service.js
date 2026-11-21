@@ -141,11 +141,20 @@ function decideCommand({ user, device, activeRoomId, teamRole, action }) {
     throw new Error(reason);
   }
 
-  // Devices that require physical confirmation (e.g. the OR table) may only be
-  // *armed* remotely — the actual move must be confirmed from the physical console
-  // via physicalConfirm(). Every other action is rejected outright.
-  if (device.requires_physical_confirm && action !== 'arm_move') {
-    throw new Error('physical_confirm_required');
+  if (device.requires_physical_confirm) {
+    // Devices that require physical confirmation (e.g. the OR table) may only be
+    // *armed* remotely — the actual move must be confirmed from the physical console
+    // via physicalConfirm() — or turned off, which is a safe disarm/stop distinct from
+    // "move" (the spec only restricts the move itself, not stopping one). Every other
+    // action is rejected outright.
+    if (action !== 'arm_move' && action !== 'turn_off') {
+      throw new Error('physical_confirm_required');
+    }
+  } else if (action === 'arm_move') {
+    // arm_move only makes meaningful sense on a physical-confirm device — on anything
+    // else it would silently put the device into an ARMED state with no console to
+    // ever confirm it, since physicalConfirm() is the only path out of ARMED.
+    throw new Error('unknown_action');
   }
 }
 

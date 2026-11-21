@@ -34,4 +34,22 @@ describe('decideCommand', () => {
       user: { roleId: 6 }, device: tableDevice, activeRoomId: 'room-1', teamRole: 'cerrah', action: 'arm_move',
     })).not.toThrow();
   });
+
+  it('requires_physical_confirm=true cihazda turn_off → izin verilmeli (güvenli disarm/stop)', () => {
+    expect(() => decideCommand({
+      user: { roleId: 6 }, device: tableDevice, activeRoomId: 'room-1', teamRole: 'cerrah', action: 'turn_off',
+    })).not.toThrow();
+  });
+
+  it('requires_physical_confirm=true cihazda set_power → hâlâ reddedilmeli (sadece arm_move/turn_off istisna)', () => {
+    expect(() => decideCommand({
+      user: { roleId: 6 }, device: tableDevice, activeRoomId: 'room-1', teamRole: 'cerrah', action: 'set_power',
+    })).toThrow(/physical_confirm_required/);
+  });
+
+  it('requires_physical_confirm=false cihazda arm_move → reddedilmeli (unknown_action — onaylayacak konsol yok)', () => {
+    expect(() => decideCommand({
+      user: { roleId: 6 }, device: cauteryDevice, activeRoomId: 'room-1', teamRole: 'cerrah', action: 'arm_move',
+    })).toThrow(/unknown_action/);
+  });
 });
