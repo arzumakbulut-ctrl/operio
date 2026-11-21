@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const db = require('../utils/db');
 const { signKioskToken } = require('../utils/kioskJwt');
+const { audit } = require('../utils/audit');
 
 /**
  * isTokenRevoked — jti'ye ait kiosk_tokens kaydı revoke edilmiş mi?
@@ -162,6 +163,22 @@ async function incrementMockCycleIndex(institutionId) {
   return rows[0].cycle_index;
 }
 
+/**
+ * recordTimeoutRead — TIMEOUT (SKS Time-Out checklist) dalının okunduğunu
+ * audit log'a yazar. TIMEOUT dalı kioskSpeakerAuth KULLANMADIĞINDAN (bkz.
+ * kiosk.routes.js) konuşmacının kimliği hiçbir zaman bilinmez — userId
+ * kasıtlı olarak her zaman null'dur.
+ */
+async function recordTimeoutRead({ surgeryId, req }) {
+  await audit({
+    userId: null,
+    action: 'voice:timeout_read',
+    resource: 'surgeries',
+    resourceId: surgeryId,
+    req,
+  });
+}
+
 module.exports = {
   isTokenRevoked,
   getActiveSurgeryForRoom,
@@ -170,4 +187,5 @@ module.exports = {
   getMockConfig,
   setMockConfig,
   incrementMockCycleIndex,
+  recordTimeoutRead,
 };

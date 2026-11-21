@@ -172,6 +172,15 @@ const mockConfigSchema = z.object({
   mode: z.enum(['always_match', 'always_reject_team', 'always_unrecognized', 'cycle']),
 });
 
+// confirmationPhrase BİLEREK optional: Task 6 (TIMEOUT/UNKNOWN) bunu kullanmaz, ama
+// Task 7'nin cihaz-komutu onay akışı (DEVICE_COMMAND'ın ikinci çağrısı) bu alanı
+// gönderecek — şema şimdiden buna izin veriyor ki ileride gevşetme ihtiyacı doğmasın.
+const kioskVoiceCommandSchema = z.object({
+  transcript: z.string(),
+  audio: z.string(),
+  confirmationPhrase: z.string().optional(),
+});
+
 // ── SAYFALAMA ────────────────────────────────────────────────
 const paginationSchema = z.object({
   page:  z.coerce.number().int().positive().default(1),
@@ -198,4 +207,5 @@ module.exports = {
   deviceCommandSchema,
   deviceConfigSchema,
   mockConfigSchema,
+  kioskVoiceCommandSchema,
 };
