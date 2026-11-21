@@ -130,10 +130,7 @@ async function updateSurgery({ id, data, institutionId, userId, req }) {
   const surgery = rows[0];
 
   if (shouldRevertArmedDevices(old.status, surgery.status)) {
-    await db.query(
-      "UPDATE controllable_devices SET power_state='OFF', power_level=0 WHERE room_id=$1 AND power_state='ARMED'",
-      [old.room_id]
-    );
+    await revertArmedDevicesInRoom({ roomId: old.room_id, institutionId, userId, req });
   }
 
   await audit({ userId, action:'UPDATE', resource:'surgery',
@@ -161,9 +158,38 @@ function shouldRevertArmedDevices(oldStatus, newStatus) {
   return oldStatus === 'IN_PROGRESS' && newStatus != null && newStatus !== 'IN_PROGRESS';
 }
 
+// Shared by updateSurgery and deleteSurgery so the revert SQL/audit/socket side-effects
+// aren't duplicated. Reverts every ARMED device in the room to OFF, and for each one
+// bumps updated_at, emits DEVICE_STATUS_CHANGED, and writes an audit_logs row — mirrors
+// what device.service.js's own command path does, so an auto-revert looks the same to
+// clients/auditors as a manually-issued turn_off.
+async function revertArmedDevicesInRoom({ roomId, institutionId, userId, req }) {
+  const { rows: reverted } = await db.query(
+    `UPDATE controllable_devices
+     SET power_state='OFF', power_level=0, updated_at=NOW()
+     WHERE room_id=$1 AND power_state='ARMED'
+     RETURNING *`,
+    [roomId]
+  );
+
+  for (const device of reverted) {
+    emitToInstitution(institutionId, EVENTS.DEVICE_STATUS_CHANGED, { device });
+    await audit({
+      userId, action: 'device:auto_revert', resource: 'controllable_devices',
+      resourceId: device.id, newData: { reason: 'surgery_ended' }, req,
+    });
+  }
+
+  return reverted;
+}
+
 async function deleteSurgery({ id, institutionId, userId, req }) {
   const old = await getSurgery({ id, institutionId });
   if (!old) return false;
+
+  if (old.status === 'IN_PROGRESS') {
+    await revertArmedDevicesInRoom({ roomId: old.room_id, institutionId, userId, req });
+  }
 
   await db.query('DELETE FROM surgeries WHERE id=$1', [id]);
   await audit({ userId, action:'DELETE', resource:'surgery',
