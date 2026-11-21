@@ -129,6 +129,13 @@ async function updateSurgery({ id, data, institutionId, userId, req }) {
   );
   const surgery = rows[0];
 
+  if (shouldRevertArmedDevices(old.status, surgery.status)) {
+    await db.query(
+      "UPDATE controllable_devices SET power_state='OFF', power_level=0 WHERE room_id=$1 AND power_state='ARMED'",
+      [old.room_id]
+    );
+  }
+
   await audit({ userId, action:'UPDATE', resource:'surgery',
     resourceId: id, surgeryId: id, oldData: old, newData: data, req });
 
@@ -148,6 +155,10 @@ async function updateSurgery({ id, data, institutionId, userId, req }) {
   }
 
   return surgery;
+}
+
+function shouldRevertArmedDevices(oldStatus, newStatus) {
+  return oldStatus === 'IN_PROGRESS' && newStatus != null && newStatus !== 'IN_PROGRESS';
 }
 
 async function deleteSurgery({ id, institutionId, userId, req }) {
@@ -183,4 +194,5 @@ async function removeTeamMember({ surgeryId, userId, actorId, req }) {
 module.exports = {
   listSurgeries, getSurgery, createSurgery, updateSurgery,
   deleteSurgery, assignTeamMember, removeTeamMember,
+  shouldRevertArmedDevices,
 };
