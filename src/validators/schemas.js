@@ -113,9 +113,53 @@ const deviceCreateSchema = z.object({
   capabilities:            z.record(z.any()).optional(),
 });
 
+// value'nun gerçek şekli action'a bağlı — paylaşılan `action` alanı yüzünden gerçek bir
+// discriminated union pratik olmadığından, action bazında manuel doğrulama yapan bir
+// superRefine kullanılıyor.
 const deviceCommandSchema = z.object({
   action: z.enum(['turn_on', 'turn_off', 'set_power', 'arm_move', 'invoke_action']),
   value:  z.any().optional(),
+}).superRefine((data, ctx) => {
+  switch (data.action) {
+    case 'set_power': {
+      const result = z.number().int().min(0).max(100).safeParse(data.value);
+      if (!result.success) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom, path: ['value'],
+          message: 'set_power için value, 0-100 arası bir tam sayı olmalı',
+        });
+      }
+      break;
+    }
+    case 'arm_move': {
+      if (data.value !== undefined) {
+        const result = z.string().max(50).safeParse(data.value);
+        if (!result.success) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom, path: ['value'],
+            message: 'arm_move için value, en fazla 50 karakterlik bir metin olmalı',
+          });
+        }
+      }
+      break;
+    }
+    case 'invoke_action': {
+      const result = z.object({
+        name: z.string(),
+        args: z.record(z.any()).optional(),
+      }).safeParse(data.value);
+      if (!result.success) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom, path: ['value'],
+          message: 'invoke_action için value, { name, args? } şeklinde olmalı',
+        });
+      }
+      break;
+    }
+    // turn_on / turn_off: value gönderilse de yok sayılır, ek doğrulama gerekmez.
+    default:
+      break;
+  }
 });
 
 const deviceConfigSchema = z.object({
