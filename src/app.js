@@ -16,6 +16,7 @@ const deviceRoutes       = require('./routes/device.routes');
 const kioskAdminRoutes   = require('./routes/kioskAdmin.routes');
 const kioskRoutes        = require('./routes/kiosk.routes');
 const voiceProfileRoutes = require('./routes/voiceProfile.routes');
+const spotifyRoutes      = require('./routes/spotify.routes');
 const { patientRouter, roomRouter, setRouter, auditRouter } = require('./routes/other.routes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 
@@ -122,6 +123,7 @@ app.use('/api/devices',      deviceRoutes);
 app.use('/api/kiosk-admin',  kioskAdminRoutes);
 app.use('/api/kiosk',        kioskRoutes);
 app.use('/api/profile',      voiceProfileRoutes);
+app.use('/api/spotify',      spotifyRoutes);
 app.use('/api/ws',            notificationRoutes);
 app.use('/api/ai',          aiRoutes);
 
