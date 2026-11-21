@@ -8,6 +8,7 @@ const { ok, serverError } = require('../utils/response');
 const { handleCommandError } = require('../utils/deviceCommandErrors');
 const { createPendingConfirmation, resolvePendingConfirmation } = require('../services/kioskConfirmation.service');
 const { MockSpotifyPlaybackDriver } = require('../drivers/MockSpotifyPlaybackDriver');
+const { isClinicalQuestion } = require('../utils/clinicalQuestionClassifier');
 
 // Servis varsayılan olarak gerçek implementasyonu kullanır
 // Test ortamında mock inject edilebilir (device.routes.js'teki desenle aynı)
@@ -15,6 +16,7 @@ const registry = require('../services/_registry');
 const getKioskService   = () => registry.get('kiosk', () => require('../services/kiosk.service'));
 const getDeviceService  = () => registry.get('device', () => require('../services/device.service'));
 const getSpotifyService = () => registry.get('spotify', () => require('../services/spotify.service'));
+const getAiService      = () => registry.get('ai', () => require('../services/ai.service'));
 // Spotify çalma sürücüsü de (device.service ile aynı sebeple) registry üzerinden alınır —
 // kioskSpeakerAuth'un getSpeakerVerifier()'ı (registry'siz, sabit factory) buna UYGUN
 // DEĞİLDİR, çünkü MockSpeakerVerifier.identify() yan etkisizdir ama MockSpotifyPlaybackDriver.
@@ -84,6 +86,24 @@ function extractSpotifyQuery(transcript) {
   return rest.trim();
 }
 
+/**
+ * extractWebSearchQuery — WEB_SEARCH transcript'inden arama sorgusunu çıkarır.
+ * parseIntent WEB_SEARCH için params.query DÖNDÜRMEZ (sadece transcript'in
+ * kioskIntent.js'teki WEB_SEARCH_RE = /^(ara|bul)[:\s]/i ile eşleştiğini tespit
+ * eder) — bu basit ikinci-aşama ayrıştırma, eşleşen öneki (tam olarak "ara:"/
+ * "ara "/"bul:"/"bul " — regex'in kendisi tek bir ':' ya da boşluk karakteri
+ * tüketir) transcript'ten kırpıp kalanı trim'ler. extractSpotifyQuery'nin
+ * aksine ek noktalama temizliği YAPMAZ (kasıtlı olarak basit tutulmuştur —
+ * bkz. task brief); kalan boşsa (sadece boşluklardan ibaretse) çağıran taraf
+ * bunu "anlayamadım" fallback'i olarak ele alır.
+ */
+function extractWebSearchQuery(transcript) {
+  const text = transcript ?? '';
+  const match = text.match(/^(ara|bul)[:\s]/i);
+  if (!match) return '';
+  return text.slice(match[0].length).trim();
+}
+
 // SKS (Sağlıkta Kalite Standartları) Time-Out checklist, madde 16-17 — sabit metin.
 const TIMEOUT_SENTENCES = [
   'Ekipteki kişiler kendilerini ad, soyad ve görevleri ile tanıttı mı?',
@@ -117,8 +137,14 @@ const UNKNOWN_RESPONSE = { type: 'UNKNOWN', say: 'Anlayamadım, tekrar söyler m
  *   GERÇEK bir Spotify arama çağrısı yapılır (sadece arama/resolve — plandaki tasarım
  *   kararı: gerçek play/transfer-playback endpoint'i bu fazda hiç çağrılmaz) → bulunan
  *   track/playlist MockSpotifyPlaybackDriver'a (ağ çağrısı yapmaz, audit() yazar) geçirilir.
- * - WEB_SEARCH: Task 10'da eklenecek — bu dal kasıtlı olarak boş/TODO bırakıldı, şimdilik
- *   ortak UNKNOWN fallback'ine düşer.
+ * - WEB_SEARCH (Task 10): SPOTIFY_PLAY gibi kioskSpeakerAuth'tan manuel geçer ve TEK
+ *   adımda sonuçlanır (sesli onay döngüsüne hiç girmez). Sırasıyla: transcript'ten
+ *   sorgu çıkarılır (extractWebSearchQuery — "ara:"/"ara "/"bul:"/"bul " önekini
+ *   kırpar) → boşsa "anlayamadım" fallback'i → ai.service.webSearch(query) ile
+ *   GERÇEK bir Claude web_search çağrısı yapılır → isClinicalQuestion(query) true
+ *   ise yanıtın önüne doğrulanmamış-kaynak uyarısı eklenir → kiosk.service.
+ *   recordWebSearch() ile audit'e SADECE soru+özet yazılır (audit() burada DOĞRUDAN
+ *   çağrılmaz — bu projenin konvansiyonu, bkz. recordTimeoutRead).
  * - UNKNOWN (veya transcript < 3 karakter — bkz. parseIntent): sabit "Anlayamadım" yanıtı.
  */
 router.post(
@@ -260,7 +286,41 @@ router.post(
       }
 
       if (intent.type === 'WEB_SEARCH') {
-        // TODO(Task 10): kioskSpeakerAuth + web arama servisi çağrısı buraya eklenecek.
+        // Aynı manuel kioskSpeakerAuth çağırma deseni (DEVICE_COMMAND/SPOTIFY_PLAY
+        // dallarındaki yorum, Task 7/9, bkz. yukarı) — bu dal da TEK adımda
+        // sonuçlanır, sesli onay döngüsüne hiç girmez (SPOTIFY_PLAY ile aynı ruh).
+        let speakerAuthErr = null;
+        await kioskSpeakerAuth(req, res, (err) => { speakerAuthErr = err; });
+        if (speakerAuthErr) throw speakerAuthErr;
+        if (res.headersSent) return;
+
+        const query = extractWebSearchQuery(req.body.transcript);
+        if (!query) {
+          return ok(res, { type: 'WEB_SEARCH', say: 'Ne aramamı istediğinizi anlayamadım.' });
+        }
+
+        const rawAnswer = await getAiService().webSearch(query);
+        // Gizlilik/güvenlik kararı (bkz. tasarım dokümanı): web arama klinik bir
+        // soruya cevap veriyorsa, Operia bir tıbbi danışman OLMADIĞI için yanıtın
+        // önüne doğrulanmamış-kaynak uyarısı eklenir. audit() SADECE bu nihai
+        // (uyarılı ya da uyarısız) cevabı, soruyla birlikte loglar — ham arama
+        // sonuçları/kaynaklar hiç persist edilmez (zaten webSearch() bunları ayıklar).
+        const finalAnswer = isClinicalQuestion(query)
+          ? `Bu doğrulanmış bir klinik kaynak değildir. ${rawAnswer}`
+          : rawAnswer;
+
+        // audit() DOĞRUDAN burada DEĞİL, kiosk.service.recordWebSearch() üzerinden
+        // yazılır — bu projede audit() her zaman servis katmanından yazılır
+        // (recordTimeoutRead ile aynı konvansiyon, bkz. dosya başı yorumu).
+        await getKioskService().recordWebSearch({
+          userId:    req.speaker.userId,
+          surgeryId: req.activeSurgery.id,
+          query,
+          answer:    finalAnswer,
+          req,
+        });
+
+        return ok(res, { type: 'WEB_SEARCH', say: finalAnswer });
       }
 
       // UNKNOWN ve henüz implemente edilmemiş diğer tipler için ortak fallback.

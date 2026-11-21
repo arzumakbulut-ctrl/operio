@@ -179,6 +179,29 @@ async function recordTimeoutRead({ surgeryId, req }) {
   });
 }
 
+/**
+ * recordWebSearch — WEB_SEARCH dalının (kiosk sesli web araması) audit log'a
+ * yazılmasıdır. recordTimeoutRead'in AKSİNE WEB_SEARCH dalı kioskSpeakerAuth'tan
+ * geçtiği için konuşmacı her zaman bilinir — userId null DEĞİLDİR.
+ *
+ * newData SADECE soruyu (query) ve Claude'un ürettiği özetlenmiş yanıtı (answer —
+ * isClinicalQuestion true ise klinik uyarısı önüne eklenmiş hâliyle) taşır. Ham
+ * web arama sonuçları/kaynak URL'leri hiçbir zaman loglanmaz — Claude'un
+ * web_search aracının ürettiği ara bloklar (server_tool_use/web_search_tool_result)
+ * ai.service.js'in webSearch()'ünde zaten ayıklanıp atılır, bu fonksiyona hiç
+ * ulaşmaz (bkz. kiosk.routes.js WEB_SEARCH dalı, ai.service.js webSearch()).
+ */
+async function recordWebSearch({ userId, surgeryId, query, answer, req }) {
+  await audit({
+    userId,
+    action: 'voice:web_search',
+    resource: 'surgeries',
+    resourceId: surgeryId,
+    newData: { query, answer },
+    req,
+  });
+}
+
 module.exports = {
   isTokenRevoked,
   getActiveSurgeryForRoom,
@@ -188,4 +211,5 @@ module.exports = {
   setMockConfig,
   incrementMockCycleIndex,
   recordTimeoutRead,
+  recordWebSearch,
 };
