@@ -168,5 +168,25 @@ export const auditAPI = {
   },
 };
 
+// ── CİHAZLAR (sesli cihaz kontrolü) ─────────────────────────
+export const deviceAPI = {
+  list:          (params = {}) => {
+    const q = new URLSearchParams(params).toString();
+    return get(`/devices${q ? '?' + q : ''}`).then(r => r.data);
+  },
+  get:           (id)       => get(`/devices/${id}`).then(r => r.data),
+  create:        (body)     => post('/devices', body).then(r => r.data),
+  updateConfig:  (id, body) => patch(`/devices/${id}/config`, body).then(r => r.data),
+  command:       (id, body) => post(`/devices/${id}/command`, body).then(r => r.data),
+  physicalConfirm: (id)     => post(`/devices/${id}/physical-confirm`).then(r => r.data),
+};
+
+// ── MODÜLLER (satın alınabilir ek özellikler) ───────────────
+export const moduleAPI = {
+  list:     ()     => get('/billing/modules').then(r => r.data),
+  mine:     ()     => get('/billing/modules/mine').then(r => r.data),
+  purchase: (slug) => post(`/billing/modules/${slug}/purchase`).then(r => r.data),
+};
+
 // ── TOKEN ERİŞİMİ (store için) ───────────────────────────────
 export { getAccessToken, getRefreshToken, saveTokens, clearTokens };
