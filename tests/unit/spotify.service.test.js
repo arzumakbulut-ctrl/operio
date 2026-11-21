@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import jwt from 'jsonwebtoken';
 
 /**
  * Bu dosya spotify.service.js'i `vi.mock` ile DEĞİL, Node'un native
@@ -64,6 +65,54 @@ describe('getAuthorizeUrl / verifyState (pure — db ya da fetch gerekmez)', () 
     const state = new URL(url).searchParams.get('state');
     const payload = verifyState(state);
     expect(payload.userId).toBe('user-42');
+  });
+});
+
+// Bu task'ın asıl amacı CSRF'e dayanıklı state doğrulamasıdır — bu yüzden
+// GERÇEK jwt.verify yolunun tahrif edilmiş/sahte/süresi dolmuş token'ları
+// reddettiği burada mock KULLANILMADAN doğrulanıyor (route/entegrasyon
+// testindeki "geçersiz state" senaryosu verifyState'i tamamen mock'luyor ve
+// gerçek kriptoyu hiç çalıştırmıyor — bu blok o boşluğu kapatıyor).
+describe('verifyState — tahrif edilmiş/sahte/süresi dolmuş state REDDEDİLİR (gerçek jwt.verify, mock yok)', () => {
+  it('yanlış secret ile imzalanmış (sahte/forge edilmiş) state → fırlatır', () => {
+    const { verifyState } = requireFreshService();
+    const forged = jwt.sign({ userId: 'attacker-controlled' }, 'definitely-wrong-secret', { expiresIn: '10m' });
+
+    expect(() => verifyState(forged)).toThrow();
+  });
+
+  it('geçerli bir state\'in imzası tek karakter tahrif edilmiş → fırlatır', () => {
+    const { getAuthorizeUrl, verifyState } = requireFreshService();
+    const url = getAuthorizeUrl('user-42');
+    const state = new URL(url).searchParams.get('state');
+
+    const parts = state.split('.');
+    expect(parts).toHaveLength(3); // header.payload.signature
+    const sig = parts[2];
+    const flippedChar = sig[0] === 'A' ? 'B' : 'A';
+    const tamperedSig = flippedChar + sig.slice(1);
+    const tampered = `${parts[0]}.${parts[1]}.${tamperedSig}`;
+
+    expect(() => verifyState(tampered)).toThrow();
+  });
+
+  it('süresi dolmuş state (aynı secret, geçmiş exp) → fırlatır', () => {
+    const knownSecret = 'test-only-spotify-state-secret-for-expiry-case';
+    const originalEnv = process.env.SPOTIFY_STATE_SECRET;
+    process.env.SPOTIFY_STATE_SECRET = knownSecret;
+
+    try {
+      // SPOTIFY_STATE_SECRET değişkenini servis modülü yüklenirken okuduğu
+      // için fresh require gerekiyor — aksi halde eski (varsayılan) secret
+      // sabitlenmiş kalır.
+      const { verifyState } = requireFreshService();
+      // Negatif expiresIn, imzalama anında zaten geçmişte kalan bir exp üretir.
+      const expired = jwt.sign({ userId: 'user-1' }, knownSecret, { expiresIn: -10 });
+
+      expect(() => verifyState(expired)).toThrow();
+    } finally {
+      process.env.SPOTIFY_STATE_SECRET = originalEnv;
+    }
   });
 });
 
@@ -170,6 +219,44 @@ describe('refreshAccessTokenIfNeeded (sahte db modülü + fetch vi.stubGlobal)',
     const updateCall = fakeDb.query.mock.calls[1];
     expect(updateCall[0]).toMatch(/UPDATE user_spotify_connections/);
     expect(updateCall[1]).toEqual(['brand-new-access-token', 'brand-new-refresh-token', expect.any(Date), 'user-1']);
+  });
+});
+
+describe('saveConnection (sahte db modülü — gerçek upsert SQL çalıştırılır)', () => {
+  it('INSERT ... ON CONFLICT (user_id) DO UPDATE\'i doğru tablo/sütun/parametre pozisyonlarıyla çağırır', async () => {
+    const fakeDb = { query: vi.fn().mockResolvedValue({ rows: [], rowCount: 1 }) };
+    const { saveConnection } = requireFreshService(fakeDb);
+
+    const before = Date.now();
+    await saveConnection('user-1', {
+      accessToken:   'at-1',
+      refreshToken:  'rt-1',
+      expiresIn:     3600,
+      spotifyUserId: 'sp-1',
+    });
+
+    expect(fakeDb.query).toHaveBeenCalledTimes(1);
+    const [sql, params] = fakeDb.query.mock.calls[0];
+
+    // Tablo adı, sütun listesi, conflict target ve UPDATE SET'in doğru
+    // $N pozisyonlarına eşlendiğini sabitliyor — bir sütun/parametre
+    // kayması ya da yanlış conflict target'ı burada yakalanır.
+    expect(sql).toContain('INSERT INTO user_spotify_connections (user_id, spotify_user_id, access_token, refresh_token, expires_at)');
+    expect(sql).toContain('VALUES ($1,$2,$3,$4,$5)');
+    expect(sql).toContain('ON CONFLICT (user_id) DO UPDATE');
+    expect(sql).toContain('SET spotify_user_id = $2, access_token = $3, refresh_token = $4, expires_at = $5');
+
+    expect(params).toHaveLength(5);
+    expect(params[0]).toBe('user-1');   // $1 user_id
+    expect(params[1]).toBe('sp-1');     // $2 spotify_user_id
+    expect(params[2]).toBe('at-1');     // $3 access_token
+    expect(params[3]).toBe('rt-1');     // $4 refresh_token
+    expect(params[4]).toBeInstanceOf(Date); // $5 expires_at
+
+    // expires_at ~ now + 3600s (test çalışma süresi için küçük tolerans)
+    const expiresAtMs = params[4].getTime();
+    expect(expiresAtMs).toBeGreaterThanOrEqual(before + 3600 * 1000 - 1000);
+    expect(expiresAtMs).toBeLessThanOrEqual(before + 3600 * 1000 + 5000);
   });
 });
 
