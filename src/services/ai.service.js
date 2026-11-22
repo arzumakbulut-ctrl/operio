@@ -241,4 +241,84 @@ async function webSearch(query) {
     .trim();
 }
 
-module.exports = { streamChat, chat, buildContext, webSearch };
+// ── ALET SAYIMI (Operio Vision — sterilizasyon tepsi fotoğrafı) ──────
+/**
+ * countInstruments — bir sterilizasyon tepsisi fotoğrafını Claude'un görüntü
+ * girişine verir ve beklenen alet listesindeki her alet için fotoğrafta
+ * kaç adet göründüğünü (detectedCount) tahmin etmesini ister.
+ *
+ * Modelden SADECE ```json\n{"counts":[{"name":"...","detectedCount":N}]}\n```
+ * formatında yanıt istenir; `webSearch`'teki gibi yanıttaki text bloklarını
+ * birleştirip bu bloğu regex ile yakalar. Yanıt beklenen formatta değilse
+ * (blok yok) veya JSON.parse başarısız olursa HİÇBİR ZAMAN fırlatmaz —
+ * `{ suggestions: [], parsed: false }` döner. Claude'un `counts` listesinde
+ * karşılığı bulunamayan beklenen aletler için `detectedCount: null` üretilir.
+ *
+ * @param {string} imageBase64 - tepsi fotoğrafının base64 verisi (data URL öneki olmadan)
+ * @param {string} mediaType   - örn. 'image/jpeg'
+ * @param {Array<{instrumentId: string, name: string, expectedCount: number}>} expectedInstruments
+ * @returns {Promise<{ suggestions: Array<{instrumentId: string, name: string, expectedCount: number, detectedCount: number|null}>, parsed: boolean }>}
+ */
+async function countInstruments(imageBase64, mediaType, expectedInstruments) {
+  const instrumentList = expectedInstruments
+    .map(item => `- ${item.name}: beklenen adet ${item.expectedCount}`)
+    .join('\n');
+
+  const prompt = `Bu fotoğraf bir ameliyathane sterilizasyon tepsisindeki aletleri gösteriyor. Aşağıda, bu tepside bulunması beklenen alet listesi var:
+
+${instrumentList}
+
+Fotoğrafı dikkatlice incele ve listedeki HER alet için fotoğrafta GÖREBİLDİĞİN adedi say. Bir aleti hiç göremiyorsan 0 yaz. Emin olamadığın durumlarda en olası tahminini ver.
+
+Yanıtını BAŞKA HİÇBİR METİN EKLEMEDEN, SADECE şu formatta ver:
+
+\`\`\`json
+{"counts":[{"name":"<alet adı>","detectedCount":<sayı>}]}
+\`\`\`
+
+Listedeki her alet için "counts" dizisinde bir girdi olmalı; alet adlarını yukarıdaki listedekiyle BİREBİR AYNI yaz.`;
+
+  const response = await client.messages.create({
+    model:      MODEL,
+    max_tokens: MAX_TOKENS,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
+        { type: 'text', text: prompt },
+      ],
+    }],
+  });
+
+  try {
+    const text = response.content
+      .filter(block => block.type === 'text')
+      .map(block => block.text)
+      .join('')
+      .trim();
+
+    const match = text.match(/```json\n([\s\S]*?)\n```/);
+    if (!match) {
+      return { suggestions: [], parsed: false };
+    }
+
+    const parsedJson = JSON.parse(match[1]);
+    const counts = Array.isArray(parsedJson.counts) ? parsedJson.counts : [];
+
+    const suggestions = expectedInstruments.map(expected => {
+      const found = counts.find(c => c.name === expected.name);
+      return {
+        instrumentId:  expected.instrumentId,
+        name:          expected.name,
+        expectedCount: expected.expectedCount,
+        detectedCount: found ? found.detectedCount : null,
+      };
+    });
+
+    return { suggestions, parsed: true };
+  } catch {
+    return { suggestions: [], parsed: false };
+  }
+}
+
+module.exports = { streamChat, chat, buildContext, webSearch, countInstruments };
