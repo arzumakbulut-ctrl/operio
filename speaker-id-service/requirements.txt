@@ -9,6 +9,11 @@ torch==2.7.1
 torchaudio==2.7.1
 pydub==0.25.1
 numpy==1.26.4
+# huggingface_hub explicitly pinned (otherwise an unpinned transitive
+# resolve could pick a newer release that breaks speechbrain's HF-fetch
+# call again, the same bug class that forced the speechbrain 1.0.3->1.1.2
+# bump -- see task-1-report.md).
+huggingface_hub==2.4.0
 requests==2.32.3
 pytest==8.3.4
 httpx==0.28.1
