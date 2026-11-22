@@ -9,6 +9,9 @@ const SES_PASAJI = 'Operio ses profilimi oluşturuyorum, bu cümleyi kendi doğa
 // Kayıt otomatik olarak bu süre (ms) sonunda durur — basitlik için sabit süre tercih edildi
 // (kullanıcının elle durdurması yerine); 5 saniye tek cümlelik pasaj için yeterli.
 const KAYIT_SURESI_MS = 5000;
+// Speaker-ID modeli daha güvenilir bir ses profili için birden fazla örnek bekliyor —
+// aynı pasaj art arda bu kadar kez okutulup tek bir enroll() çağrısında gönderiliyor.
+const KAYIT_ADIM_SAYISI = 3;
 
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
@@ -32,7 +35,8 @@ export default function Profil() {
 
   // Ses profili (konuşmacı doğrulama kaydı)
   const [sesProfili, setSesProfili] = useState(null);
-  const [kayitYapiliyor, setKayitYapiliyor] = useState(false);
+  // 0 = kayıt akışı başlamadı; 1..KAYIT_ADIM_SAYISI = o anda aktif olan kayıt adımı.
+  const [kayitAdimi, setKayitAdimi] = useState(0);
   const [kayitGonderiliyor, setKayitGonderiliyor] = useState(false);
   const recorderRef = useRef(null);
   const kayitTimeoutRef = useRef(null);
@@ -100,43 +104,65 @@ export default function Profil() {
     }
   }
 
+  // Tek bir kayıt döngüsü: mikrofon izni ister, pasajı KAYIT_SURESI_MS süresince
+  // kaydeder ve kaydın base64'ünü döndürür. Mevcut MediaRecorder/getUserMedia
+  // mekanizması değişmedi — sesKaydiBaslat artık bunu 3 kez art arda çağırıyor.
+  function birKayitYap() {
+    return new Promise((resolve, reject) => {
+      navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+        const chunks = [];
+        const recorder = new MediaRecorder(stream);
+        recorderRef.current = recorder;
+
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) chunks.push(e.data);
+        };
+
+        recorder.onstop = async () => {
+          stream.getTracks().forEach(t => t.stop());
+          try {
+            const blob = new Blob(chunks, { type: 'audio/webm' });
+            const base64 = await blobToBase64(blob);
+            resolve(base64);
+          } catch (err) {
+            reject(err);
+          }
+        };
+
+        recorder.start();
+        kayitTimeoutRef.current = setTimeout(() => {
+          if (recorderRef.current && recorderRef.current.state === 'recording') {
+            recorderRef.current.stop();
+          }
+        }, KAYIT_SURESI_MS);
+      }).catch(reject);
+    });
+  }
+
   async function sesKaydiBaslat() {
+    const audioBase64Array = [];
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const chunks = [];
-      const recorder = new MediaRecorder(stream);
-      recorderRef.current = recorder;
-
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunks.push(e.data);
-      };
-
-      recorder.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        setKayitYapiliyor(false);
-        setKayitGonderiliyor(true);
-        try {
-          const blob = new Blob(chunks, { type: 'audio/webm' });
-          const base64 = await blobToBase64(blob);
-          const profil = await voiceProfileAPI.enroll(base64);
-          setSesProfili(profil);
-          showToast('Ses profiliniz oluşturuldu');
-        } catch (err) {
-          showToast('Ses profili kaydedilemedi, lütfen tekrar deneyin');
-        } finally {
-          setKayitGonderiliyor(false);
-        }
-      };
-
-      recorder.start();
-      setKayitYapiliyor(true);
-      kayitTimeoutRef.current = setTimeout(() => {
-        if (recorderRef.current && recorderRef.current.state === 'recording') {
-          recorderRef.current.stop();
-        }
-      }, KAYIT_SURESI_MS);
+      for (let adim = 1; adim <= KAYIT_ADIM_SAYISI; adim++) {
+        setKayitAdimi(adim);
+        const base64 = await birKayitYap();
+        audioBase64Array.push(base64);
+      }
     } catch (err) {
+      setKayitAdimi(0);
       showToast('Mikrofon izni verilmedi');
+      return;
+    }
+
+    setKayitAdimi(0);
+    setKayitGonderiliyor(true);
+    try {
+      const profil = await voiceProfileAPI.enroll(audioBase64Array);
+      setSesProfili(profil);
+      showToast('Ses profiliniz oluşturuldu');
+    } catch (err) {
+      showToast('Ses profili kaydedilemedi, lütfen tekrar deneyin');
+    } finally {
+      setKayitGonderiliyor(false);
     }
   }
 
@@ -306,10 +332,10 @@ export default function Profil() {
                   <button
                     className="btn btn-secondary"
                     style={{ marginTop:12 }}
-                    disabled={kayitYapiliyor || kayitGonderiliyor}
+                    disabled={kayitAdimi > 0 || kayitGonderiliyor}
                     onClick={sesKaydiBaslat}
                   >
-                    {kayitYapiliyor ? 'Kaydediliyor...' : kayitGonderiliyor ? 'Gönderiliyor...' : 'Yeniden Kaydet'}
+                    {kayitAdimi > 0 ? `Kayıt ${kayitAdimi}/${KAYIT_ADIM_SAYISI}...` : kayitGonderiliyor ? 'Gönderiliyor...' : 'Yeniden Kaydet'}
                   </button>
                 </>
               ) : (
@@ -322,10 +348,10 @@ export default function Profil() {
                   </div>
                   <button
                     className="btn btn-secondary"
-                    disabled={kayitYapiliyor || kayitGonderiliyor}
+                    disabled={kayitAdimi > 0 || kayitGonderiliyor}
                     onClick={sesKaydiBaslat}
                   >
-                    {kayitYapiliyor ? 'Kaydediliyor...' : kayitGonderiliyor ? 'Gönderiliyor...' : 'Kayda Başla'}
+                    {kayitAdimi > 0 ? `Kayıt ${kayitAdimi}/${KAYIT_ADIM_SAYISI}...` : kayitGonderiliyor ? 'Gönderiliyor...' : 'Kayda Başla'}
                   </button>
                 </>
               )}
