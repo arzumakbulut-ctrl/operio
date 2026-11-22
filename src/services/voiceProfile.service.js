@@ -72,9 +72,13 @@ function averageEmbeddings(embeddings) {
 /**
  * enrollVoiceProfile — kullanıcının ses profilini, 3 ayrı ses örneğinden
  * çıkarılan gerçek embedding'lerin ortalamasını (centroid) alarak kaydeder
- * (ilk kayıtta INSERT, daha sonraki her kayıtta embedding + enrolled_at
- * güncellenerek upsert edilir — kullanıcı başına tek profil,
- * voice_profiles.user_id UNIQUE kısıtlamasıyla garanti edilir).
+ * (ilk kayıtta INSERT, daha sonraki her kayıtta embedding + enrolled_at +
+ * model_version güncellenerek upsert edilir — kullanıcı başına tek profil,
+ * voice_profiles.user_id UNIQUE kısıtlamasıyla garanti edilir). model_version
+ * da SET'e dahildir ki bir model yükseltmesi sonrası yeniden enroll eden bir
+ * kullanıcının kaydı, yeni embedding'le birlikte doğru (güncel) model_version'ı
+ * da yansıtsın — aksi halde embedding güncellenir ama model_version eski
+ * değerde "stale" kalırdı.
  *
  * Neden 3 örnek: tek bir kayıttan çıkarılan embedding, o anki ses
  * koşullarına (mikrofon mesafesi, arka plan gürültüsü, ton) fazla hassas
@@ -104,7 +108,7 @@ async function enrollVoiceProfile(userId, audioSamples) {
 
   const { rows } = await db.query(
     `INSERT INTO voice_profiles (user_id, embedding, model_version) VALUES ($1,$2,$3)
-     ON CONFLICT (user_id) DO UPDATE SET embedding=$2, enrolled_at=NOW()
+     ON CONFLICT (user_id) DO UPDATE SET embedding=$2, enrolled_at=NOW(), model_version=$3
      RETURNING enrolled_at, model_version`,
     [userId, embeddingBuffer, MODEL_VERSION]
   );

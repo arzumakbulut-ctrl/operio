@@ -29,6 +29,7 @@ describe('voiceProfile.service — gerçek embedding', () => {
   let getEmbeddingsForUsers;
   let serializeEmbedding;
   let deserializeEmbedding;
+  let MODEL_VERSION;
 
   beforeEach(() => {
     fakeQuery = vi.fn();
@@ -53,6 +54,7 @@ describe('voiceProfile.service — gerçek embedding', () => {
       getEmbeddingsForUsers,
       serializeEmbedding,
       deserializeEmbedding,
+      MODEL_VERSION,
     } = nodeRequire(voiceProfileServicePath));
   });
 
@@ -91,6 +93,35 @@ describe('voiceProfile.service — gerçek embedding', () => {
       expect(Buffer.isBuffer(embeddingBuffer)).toBe(true);
       expect(deserializeEmbedding(embeddingBuffer)).toEqual([1, 1]);
       expect(embeddingBuffer).toEqual(serializeEmbedding([1, 1]));
+    });
+
+    it('yeniden enrollment (ON CONFLICT) SQL\'inde model_version SET\'e dahildir — stale model_version kalmaz', async () => {
+      // Review finding: SET embedding=$2, enrolled_at=NOW() eskiden model_version'ı
+      // güncellemiyordu. Bir kullanıcı eski bir model_version ile zaten enroll
+      // olmuşken yeniden enroll ederse (ör. model yükseltmesi sonrası), hem
+      // embedding hem model_version güncellenmeli — DB satırı eski (stale) bir
+      // model_version'da kalmamalı.
+      fakeGetEmbedding
+        .mockResolvedValueOnce([1, 0])
+        .mockResolvedValueOnce([0, 1])
+        .mockResolvedValueOnce([2, 2]);
+      // Gerçek Postgres'te ON CONFLICT ... DO UPDATE satırı günceller ve
+      // RETURNING bunu yansıtır — burada DB'nin UPDATE'i uyguladığını simüle
+      // ediyoruz: dönen satır artık MEVCUT (yeni) MODEL_VERSION'ı taşır.
+      fakeQuery.mockResolvedValueOnce({
+        rows: [{ enrolled_at: new Date('2026-03-01T00:00:00Z'), model_version: MODEL_VERSION }],
+      });
+
+      const result = await enrollVoiceProfile('u1', ['sample-a', 'sample-b', 'sample-c']);
+
+      const [sql, params] = fakeQuery.mock.calls[0];
+      // SET clause'un tam olarak model_version=$3'ü de içerdiğini doğrula —
+      // sadece embedding=$2, enrolled_at=NOW() değil.
+      expect(sql).toMatch(/ON CONFLICT \(user_id\) DO UPDATE SET embedding=\$2, enrolled_at=NOW\(\), model_version=\$3/);
+      // Yeni model_version, hem INSERT değer listesine hem de (aynı $3
+      // parametresi üzerinden) conflict-update'e geçiriliyor — stale kalmaz.
+      expect(params[2]).toBe(MODEL_VERSION);
+      expect(result.modelVersion).toBe(MODEL_VERSION);
     });
 
     it('audioSamples 3 eleman değilse (ör. 2 veya 4) hata fırlatır', async () => {
