@@ -38,6 +38,13 @@ module.exports = {
     TOTP_MAX:             5,
     API_WINDOW_MS:        15 * 60 * 1000,
     API_MAX:              100,
+    // Kiosk (/api/kiosk/*) — genel IP-bazlı limitten muaf; kiosk token'ının jti'sine
+    // göre (cihaz başına) anahtarlanır. Boştaki bir kiosk /status yoklamasıyla 60
+    // istek/15dk üretir; sesli komutlar (onaylı cihaz komutu = 2 çağrı) bunun üstüne
+    // patlamalı ama sınırlı gelir. 300/15dk (~20/dk) bunu rahatça karşılar, yine de
+    // çalınmış/hatalı bir token'ın sınırsız istek atmasını engeller.
+    KIOSK_WINDOW_MS:      15 * 60 * 1000,
+    KIOSK_MAX:            300,
   },
 
   // CSP (Content Security Policy)

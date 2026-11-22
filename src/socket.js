@@ -11,6 +11,7 @@ const EVENTS = {
   SURGERY_DELETED:    'surgery:deleted',
   ROOM_STATUS_CHANGED:'room:status_changed',
   SET_STATUS_CHANGED: 'set:status_changed',
+  DEVICE_STATUS_CHANGED: 'device:status_changed',
   NOTIFICATION:       'notification:new',
   USER_JOINED:        'user:joined',
   USER_LEFT:          'user:left',

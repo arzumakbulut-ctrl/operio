@@ -5,6 +5,11 @@ const { validate, validateQuery } = require('../middleware/validate');
 const { ok, created, badRequest, serverError } = require('../utils/response');
 const subService = require('../services/subscription.service');
 
+// Servis varsayılan olarak gerçek implementasyonu kullanır
+// Test ortamında mock inject edilebilir
+const registry = require('../services/_registry');
+const getModuleService = () => registry.get('module', () => require('../services/module.service'));
+
 // ── PLANLAR (public) ──────────────────────────────────────────
 
 // GET /api/billing/plans
@@ -224,6 +229,35 @@ router.get('/limits', authenticate, async (req, res) => {
         users: { used: parseInt(usersRes.rows[0].count), max: sub.max_users },
       },
     });
+  } catch (err) { return serverError(res, err); }
+});
+
+// ── SATIN ALINABİLİR MODÜLLER ─────────────────────────────────
+
+// GET /api/billing/modules — public katalog (authenticate yok)
+router.get('/modules', async (req, res) => {
+  try {
+    const modules = await getModuleService().getModules();
+    return ok(res, modules);
+  } catch (err) { return serverError(res, err); }
+});
+
+// GET /api/billing/modules/mine — kurumun satın aldığı modüller
+router.get('/modules/mine', authenticate, async (req, res) => {
+  try {
+    const modules = await getModuleService().getInstitutionModules(req.user.institutionId);
+    return ok(res, modules);
+  } catch (err) { return serverError(res, err); }
+});
+
+// POST /api/billing/modules/:slug/purchase — sadece Üst Yönetici(0)
+router.post('/modules/:slug/purchase', authenticate, authorize(0), async (req, res) => {
+  try {
+    const result = await getModuleService().purchaseModule({
+      institutionId: req.user.institutionId,
+      slug:          req.params.slug,
+    });
+    return created(res, result);
   } catch (err) { return serverError(res, err); }
 });
 
