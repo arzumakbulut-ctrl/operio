@@ -83,6 +83,13 @@ function SayimModal({ setId, onClose }) {
   // olmayan tüm diğer setler (ve ileride eklenecek yeni mock setler) eski,
   // tamamen yerel/mock davranışına AYNEN devam eder.
   const hasBackend = Boolean(s?.backendSetId);
+  // Gerçek enstrüman listesi yüklenemezse (404, ağ hatası, 500…) modal bu
+  // oturum boyunca eski mock dalına düşer — sayım akışı kilitlenmesin diye.
+  const [backendFailed, setBackendFailed] = useState(false);
+  // Bu modalın gerçek backend dalını kullanıp kullanmadığı. hasBackend yalnızca
+  // "setin backendSetId'si var mı"yı söyler; useReal ise fetch başarısız
+  // olduğunda false'a döner ve tüm render/kaydet mantığı buna bakar.
+  const useReal = hasBackend && !backendFailed;
 
   // Gerçek backend dalı: API'den gelen enstrüman listesi. null = henüz yüklenmedi.
   const [realInstruments, setRealInstruments] = useState(null);
@@ -93,6 +100,7 @@ function SayimModal({ setId, onClose }) {
   const [teslimEden, setTeslimEden] = useState('');
   const [salon, setSalon] = useState('');
   const [notlar, setNotlar] = useState('');
+  const [kaydediliyor, setKaydediliyor] = useState(false);
 
   // AI ile fotoğrafla sayım — modül-gated CTA + yakalama akışı.
   // null = henüz kontrol edilmedi (moduleAPI.mine() dönmedi), true/false = kesin durum.
@@ -103,6 +111,9 @@ function SayimModal({ setId, onClose }) {
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  // getUserMedia() beklenirken modal kapanırsa, sonradan çözülen akışı
+  // hemen durdurabilmek için (sızan kamera olmasın).
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     if (!hasBackend) return;
@@ -112,6 +123,13 @@ function SayimModal({ setId, onClose }) {
       const instruments = data?.instruments || [];
       setRealInstruments(instruments);
       setSayimlar(instruments.reduce((o, ins) => { o[ins.id] = ins.expected_count; return o; }, {}));
+    }).catch((e) => {
+      if (!aktif) return;
+      // Gerçek veri alınamadı — kalıcı "yükleniyor" kilidi yerine eski mock
+      // dalına (index-anahtarlı sayaçlar, sadece mock-store kaydı, AI yok) düş.
+      setBackendFailed(true);
+      setSayimlar((s?.aletler || []).reduce((o, _, i) => { o[i] = akis.gercekSayim[i] ?? 1; return o; }, {}));
+      showToast('Alet listesi sunucudan yüklenemedi' + (e?.message ? ' (' + e.message + ')' : '') + ' — yerel listeyle devam ediliyor');
     });
     return () => { aktif = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -131,12 +149,25 @@ function SayimModal({ setId, onClose }) {
 
   // Modal kapanırken açık kamera akışı varsa bırak — arka planda çalışan
   // bir kamera cihazı sızdırılmasın.
-  useEffect(() => () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+    };
   }, []);
+
+  // <video> yalnızca cameraOpen true olduktan sonra mount ediliyor — akışı
+  // ancak o render'dan sonra (bu effect'te) bağlayabiliriz; startCamera
+  // içinde senkron atama yapıldığında videoRef.current henüz null'dı.
+  useEffect(() => {
+    if (cameraOpen && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+    }
+  }, [cameraOpen]);
 
   function stopCamera() {
     if (streamRef.current) {
@@ -153,20 +184,31 @@ function SayimModal({ setId, onClose }) {
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      if (!mountedRef.current) {
+        // Modal izin beklenirken kapandı — akışı hemen bırak.
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       streamRef.current = stream;
-      if (videoRef.current) videoRef.current.srcObject = stream;
+      // srcObject ataması cameraOpen effect'inde, <video> mount olduktan sonra yapılır.
       setCameraOpen(true);
     } catch {
-      showToast('Kameraya erişilemedi');
+      if (mountedRef.current) showToast('Kameraya erişilemedi');
     }
   }
 
   function captureFromCamera() {
     const video = videoRef.current;
     if (!video) return;
+    // Henüz gerçek bir kare yoksa (akış bağlanmadı / ilk kare gelmedi) boş
+    // bir görüntüyü AI'a göndermeyelim — sıfır önerilerle sayaçları bozar.
+    if (!(video.videoWidth > 0) || !(video.videoHeight > 0)) {
+      showToast('Kamera görüntüsü henüz hazır değil, lütfen bir saniye bekleyin');
+      return;
+    }
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) { showToast('Kamera görüntüsü yakalanamadı'); return; }
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -190,7 +232,7 @@ function SayimModal({ setId, onClose }) {
         showToast('AI sayamadı, lütfen elle sayın');
       }
     } catch (e) {
-      showToast('Fotoğraf analiz edilemedi: ' + (e?.message || ''));
+      showToast('Fotoğraf analiz edilemedi' + (e?.message ? ': ' + e.message : ''));
     } finally {
       setAiBusy(false);
       setPhotoMenuOpen(false);
@@ -213,9 +255,10 @@ function SayimModal({ setId, onClose }) {
   // ederken) kaydet() tetiklenirse realInstruments hâlâ null olur — bu
   // durumda counts:[] gönderilip tamMi yanlışlıkla true olurdu. Bu yüzden
   // hem kaydet() hem de gönder butonu bu pencerede devre dışı bırakılır.
-  const yukleniyor = hasBackend && realInstruments === null;
+  const yukleniyor = useReal && realInstruments === null;
 
-  function kaydet() {
+  async function kaydet() {
+    if (kaydediliyor) return;
     if (yukleniyor) { showToast('Aletler yükleniyor, lütfen bekleyin'); return; }
     if (!teslimEden.trim()) { showToast('Teslim eden personeli girin'); return; }
     if (!salon) { showToast('Salon seçin'); return; }
@@ -223,15 +266,26 @@ function SayimModal({ setId, onClose }) {
     const saat = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
 
     let tamMi;
-    if (hasBackend) {
+    if (useReal) {
       const instruments = realInstruments || [];
       tamMi = instruments.every(ins => (sayimlar[ins.id] ?? 0) >= ins.expected_count);
-      sterileSetsAPI.addTracking(s.backendSetId, {
-        stage: 'teslim_alindi',
-        operator: teslimEden,
-        notes: notlar,
-        counts: instruments.map(ins => ({ instrumentId: ins.id, count: sayimlar[ins.id] })),
-      });
+      setKaydediliyor(true);
+      try {
+        await sterileSetsAPI.addTracking(s.backendSetId, {
+          stage: 'teslim_alindi',
+          operator: teslimEden,
+          notes: notlar,
+          counts: instruments.map(ins => ({ instrumentId: ins.id, count: sayimlar[ins.id] })),
+        });
+      } catch (e) {
+        // Kayıt başarısız — başarı toast'ı gösterme, akışı ilerletme, modalı
+        // açık bırak ki kullanıcı tekrar deneyebilsin.
+        if (mountedRef.current) setKaydediliyor(false);
+        showToast('Sayım kaydedilemedi' + (e?.message ? ': ' + e.message : '') + ' — lütfen tekrar deneyin');
+        return;
+      }
+      if (!mountedRef.current) return;
+      setKaydediliyor(false);
     } else {
       tamMi = s.aletler.every((_, i) => (sayimlar[i] ?? 1) >= 1);
     }
@@ -246,11 +300,11 @@ function SayimModal({ setId, onClose }) {
     onClose();
   }
 
-  const toplamAdet = hasBackend ? (realInstruments || []).length : s.aletler.length;
-  const tamSayisi = hasBackend
+  const toplamAdet = useReal ? (realInstruments || []).length : s.aletler.length;
+  const tamSayisi = useReal
     ? (realInstruments || []).filter(ins => (sayimlar[ins.id] ?? 0) === ins.expected_count).length
     : s.aletler.filter((_, i) => (sayimlar[i] ?? 1) === 1).length;
-  const eksiVar = hasBackend
+  const eksiVar = useReal
     ? (realInstruments || []).some(ins => (sayimlar[ins.id] ?? 0) < ins.expected_count)
     : s.aletler.some((_, i) => (sayimlar[i] ?? 1) < 1);
 
@@ -274,7 +328,7 @@ function SayimModal({ setId, onClose }) {
 
       {/* AI ile fotoğrafla sayım — sadece gerçek backend setlerinde, aletler
           yüklendikten (yukleniyor) sonra ve modül satın alınmışsa gösterilir. */}
-      {hasBackend && !yukleniyor && visionActive === false && (
+      {useReal && !yukleniyor && visionActive === false && (
         <div className="empty" style={{ marginBottom:14, padding:'16px 14px' }}>
           <div className="empty-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:22, height:22 }}>
@@ -290,7 +344,7 @@ function SayimModal({ setId, onClose }) {
         </div>
       )}
 
-      {hasBackend && !yukleniyor && visionActive === true && (
+      {useReal && !yukleniyor && visionActive === true && (
         <div style={{ marginBottom:14 }}>
           {!photoMenuOpen ? (
             <button type="button" className="btn btn-secondary" onClick={() => setPhotoMenuOpen(true)}>
@@ -329,7 +383,7 @@ function SayimModal({ setId, onClose }) {
                   </button>
                 </div>
               )}
-              {aiBusy && <div style={{ fontSize:11, color:'var(--slate-light)', marginTop:8 }}>AI analiz ediyor…</div>}
+              {aiBusy && <div role="status" aria-live="polite" style={{ fontSize:11, color:'var(--slate-light)', marginTop:8 }}>AI analiz ediyor…</div>}
             </div>
           )}
         </div>
@@ -355,7 +409,7 @@ function SayimModal({ setId, onClose }) {
             <span key={h} style={{ fontSize:9, fontWeight:700, color:'var(--slate-light)', textTransform:'uppercase', letterSpacing:'0.5px', textAlign:'center' }}>{h}</span>
           ))}
         </div>
-        {hasBackend ? (
+        {useReal ? (
           realInstruments === null ? (
             <div style={{ padding:'16px 12px', textAlign:'center', fontSize:12, color:'var(--slate-light)' }}>Aletler yükleniyor…</div>
           ) : realInstruments.map((ins) => {
@@ -366,9 +420,9 @@ function SayimModal({ setId, onClose }) {
                 <div style={{ fontSize:12, fontWeight:500, color:'var(--slate)' }}>{ins.name}</div>
                 <div style={{ textAlign:'center', fontSize:12, fontWeight:600, color:'var(--slate-mid)' }}>{ins.expected_count}</div>
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
-                  <div className="cnt-btn" onClick={() => degistir(ins.id, -1, ins.expected_count)}>−</div>
+                  <button type="button" className="cnt-btn" style={{ padding:0, fontFamily:"inherit" }} aria-label={`${ins.name} azalt`} onClick={() => degistir(ins.id, -1, ins.expected_count)}>−</button>
                   <div data-testid={`sayim-value-${ins.id}`} className={`cnt-val ${ok?'cnt-ok':fazla?'cnt-fazla':'cnt-miss'}`} style={{ width:30, fontSize:13, fontWeight:800 }}>{say}</div>
-                  <div className="cnt-btn" onClick={() => degistir(ins.id, 1, ins.expected_count)}>+</div>
+                  <button type="button" className="cnt-btn" style={{ padding:0, fontFamily:"inherit" }} aria-label={`${ins.name} arttır`} onClick={() => degistir(ins.id, 1, ins.expected_count)}>+</button>
                 </div>
                 <div style={{ textAlign:'center', fontSize:16 }}>
                   {ok ? <span style={{ color:'var(--success)' }}>✓</span> : fazla ? <span style={{ color:'var(--warning)', fontSize:13 }}>↑</span> : <span style={{ color:'var(--danger)' }}>⚠</span>}
@@ -407,8 +461,8 @@ function SayimModal({ setId, onClose }) {
 
       <div className="mf">
         <button className="btn btn-secondary" onClick={onClose}>İptal</button>
-        <button className="btn btn-primary" onClick={kaydet} disabled={yukleniyor} title={yukleniyor ? 'Aletler yükleniyor…' : undefined}>
-          {yukleniyor ? 'Aletler yükleniyor…' : 'Sayımı Onayla & Teslim Al'}
+        <button className="btn btn-primary" onClick={kaydet} disabled={yukleniyor || kaydediliyor} title={yukleniyor ? 'Aletler yükleniyor…' : undefined}>
+          {yukleniyor ? 'Aletler yükleniyor…' : kaydediliyor ? 'Kaydediliyor…' : 'Sayımı Onayla & Teslim Al'}
         </button>
       </div>
     </Modal>

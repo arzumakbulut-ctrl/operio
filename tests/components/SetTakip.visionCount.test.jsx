@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import SetTakip from '../../src/pages/SetTakip.jsx';
 import { useDataStore, useUIStore, useAuthStore } from '../../src/store';
@@ -119,5 +119,152 @@ describe('SetTakip — AI ile fotoğrafla sayım + modül CTA', () => {
     // Hata toast'ı gösterilmeli.
     await waitFor(() => expect(useUIStore.getState().toastVisible).toBe(true));
     expect(useUIStore.getState().toastMsg).toBe('AI sayamadı, lütfen elle sayın');
+  });
+
+  it("visionCount 503 (AI_UNAVAILABLE) ile reddedilirse anlaşılır bir hata toast'ı gösterilir ve sayaçlar değişmez", async () => {
+    const { moduleAPI, sterileSetsAPI } = await import('../../src/services/api.js');
+    moduleAPI.mine.mockResolvedValueOnce([{ slug: 'vision_counting' }]);
+    sterileSetsAPI.get.mockResolvedValueOnce({
+      id: BACKEND_SET_ID,
+      instruments: [{ id: 'i1', name: 'Trokar 10mm', expected_count: 1, current_count: 1 }],
+    });
+    // api.js'in request() hatası: new Error(data.error.message) + code/status alanları.
+    sterileSetsAPI.visionCount.mockRejectedValueOnce(
+      Object.assign(new Error('AI servisi şu anda kullanılamıyor'), { code: 'AI_UNAVAILABLE', status: 503 })
+    );
+
+    render(<SetTakip />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Teslim Al' }));
+    fireEvent.click(await screen.findByRole('button', { name: '📷 Fotoğrafla Say' }));
+
+    const dosyaInput = await screen.findByTestId('vision-photo-input');
+    fireEvent.change(dosyaInput, { target: { files: [new File(['x'], 'a.jpg', { type: 'image/jpeg' })] } });
+
+    await waitFor(() =>
+      expect(useUIStore.getState().toastMsg).toBe('Fotoğraf analiz edilemedi: AI servisi şu anda kullanılamıyor')
+    );
+    expect(screen.getByTestId('sayim-value-i1')).toHaveTextContent('1');
+  });
+
+  it('parsed:true ve null/null-olmayan detectedCount karışık gelirse null olan sayaç DEĞİŞMEZ, diğerleri güncellenir', async () => {
+    const { moduleAPI, sterileSetsAPI } = await import('../../src/services/api.js');
+    moduleAPI.mine.mockResolvedValueOnce([{ slug: 'vision_counting' }]);
+    sterileSetsAPI.get.mockResolvedValueOnce({
+      id: BACKEND_SET_ID,
+      instruments: [
+        { id: 'i1', name: 'Trokar 10mm', expected_count: 1, current_count: 1 },
+        { id: 'i2', name: 'Trokar 5mm', expected_count: 2, current_count: 2 },
+        { id: 'i3', name: 'Grasper', expected_count: 3, current_count: 3 },
+      ],
+    });
+    sterileSetsAPI.visionCount.mockResolvedValueOnce({
+      parsed: true,
+      suggestions: [
+        { instrumentId: 'i1', name: 'Trokar 10mm', expectedCount: 1, detectedCount: 0 },
+        { instrumentId: 'i2', name: 'Trokar 5mm', expectedCount: 2, detectedCount: null },
+        { instrumentId: 'i3', name: 'Grasper', expectedCount: 3, detectedCount: 5 },
+      ],
+    });
+
+    render(<SetTakip />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Teslim Al' }));
+
+    // i2'yi elle değiştir (2 → 3) — AI null döndüğü için bu düzeltme korunmalı.
+    fireEvent.click(await screen.findByRole('button', { name: 'Trokar 5mm arttır' }));
+    expect(screen.getByTestId('sayim-value-i2')).toHaveTextContent('3');
+
+    fireEvent.click(await screen.findByRole('button', { name: '📷 Fotoğrafla Say' }));
+    const dosyaInput = await screen.findByTestId('vision-photo-input');
+    fireEvent.change(dosyaInput, { target: { files: [new File(['x'], 'a.jpg', { type: 'image/jpeg' })] } });
+
+    await waitFor(() => expect(screen.getByTestId('sayim-value-i3')).toHaveTextContent('5'));
+    expect(screen.getByTestId('sayim-value-i1')).toHaveTextContent('0');
+    expect(screen.getByTestId('sayim-value-i2')).toHaveTextContent('3');
+  });
+
+  it('AI analizi sürerken erişilebilir bir durum bildirimi (role=status) gösterilir', async () => {
+    const { moduleAPI, sterileSetsAPI } = await import('../../src/services/api.js');
+    moduleAPI.mine.mockResolvedValueOnce([{ slug: 'vision_counting' }]);
+    sterileSetsAPI.get.mockResolvedValueOnce({
+      id: BACKEND_SET_ID,
+      instruments: [{ id: 'i1', name: 'Trokar 10mm', expected_count: 1, current_count: 1 }],
+    });
+    sterileSetsAPI.visionCount.mockImplementationOnce(() => new Promise(() => {}));
+
+    render(<SetTakip />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Teslim Al' }));
+    fireEvent.click(await screen.findByRole('button', { name: '📷 Fotoğrafla Say' }));
+    const dosyaInput = await screen.findByTestId('vision-photo-input');
+    fireEvent.change(dosyaInput, { target: { files: [new File(['x'], 'a.jpg', { type: 'image/jpeg' })] } });
+
+    const durum = await screen.findByRole('status');
+    expect(durum).toHaveTextContent('AI analiz ediyor…');
+    expect(durum).toHaveAttribute('aria-live', 'polite');
+    // Dosya okuma asenkron — çağrının bu test içinde gerçekleşmesini bekle,
+    // sonraki testin mock'una sızmasın.
+    await waitFor(() => expect(sterileSetsAPI.visionCount).toHaveBeenCalled());
+  });
+
+  describe('canlı kamera', () => {
+    let eskiMediaDevices;
+    beforeEach(() => { eskiMediaDevices = navigator.mediaDevices; });
+    afterEach(() => {
+      Object.defineProperty(navigator, 'mediaDevices', { value: eskiMediaDevices, configurable: true });
+    });
+
+    function sahteAkis() {
+      const stop = vi.fn();
+      return { stop, stream: { getTracks: () => [{ stop }] } };
+    }
+
+    async function kameraMenusunuAc() {
+      const { moduleAPI, sterileSetsAPI } = await import('../../src/services/api.js');
+      moduleAPI.mine.mockResolvedValueOnce([{ slug: 'vision_counting' }]);
+      sterileSetsAPI.get.mockResolvedValueOnce({
+        id: BACKEND_SET_ID,
+        instruments: [{ id: 'i1', name: 'Trokar 10mm', expected_count: 1, current_count: 1 }],
+      });
+      const utils = render(<SetTakip />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Teslim Al' }));
+      fireEvent.click(await screen.findByRole('button', { name: '📷 Fotoğrafla Say' }));
+      return { ...utils, sterileSetsAPI };
+    }
+
+    it('akış, <video> mount olduktan sonra srcObject olarak bağlanır; kare hazır değilken "Çek" AI çağırmaz', async () => {
+      const { stream } = sahteAkis();
+      Object.defineProperty(navigator, 'mediaDevices', {
+        value: { getUserMedia: vi.fn().mockResolvedValue(stream) }, configurable: true,
+      });
+      const { container, sterileSetsAPI } = await kameraMenusunuAc();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Canlı Kamera' }));
+      const cekButonu = await screen.findByRole('button', { name: 'Çek' });
+      const video = container.ownerDocument.querySelector('video');
+      expect(video).not.toBeNull();
+      expect(video.srcObject).toBe(stream);
+
+      // jsdom'da videoWidth 0 — gerçek kare yok, yakalama/analiz yapılmamalı.
+      fireEvent.click(cekButonu);
+      expect(useUIStore.getState().toastMsg).toMatch(/Kamera görüntüsü henüz hazır değil/);
+      expect(sterileSetsAPI.visionCount).not.toHaveBeenCalled();
+    });
+
+    it('getUserMedia beklenirken modal kapanırsa sonradan gelen akış hemen durdurulur', async () => {
+      const { stream, stop } = sahteAkis();
+      let resolveMedia;
+      Object.defineProperty(navigator, 'mediaDevices', {
+        value: { getUserMedia: vi.fn(() => new Promise((r) => { resolveMedia = r; })) }, configurable: true,
+      });
+      await kameraMenusunuAc();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Canlı Kamera' }));
+      fireEvent.click(screen.getByRole('button', { name: 'İptal' }));
+      await waitFor(() =>
+        expect(screen.queryByText('Alet Sayım Formu — Laparoskopi Seti A')).not.toBeInTheDocument()
+      );
+
+      resolveMedia(stream);
+      await waitFor(() => expect(stop).toHaveBeenCalled());
+    });
   });
 });

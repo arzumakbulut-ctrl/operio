@@ -162,4 +162,83 @@ describe('SetTakip — SayimModal gerçek backend entegrasyonu', () => {
     expect(sterileSetsAPI.get).not.toHaveBeenCalled();
     expect(sterileSetsAPI.addTracking).not.toHaveBeenCalled();
   });
+
+  it('GET /sterile-sets/:id başarısız olursa modal "yükleniyor"da kilitlenmez — toast gösterilir ve eski mock dalına düşülür', async () => {
+    const { sterileSetsAPI } = await import('../../src/services/api.js');
+    sterileSetsAPI.get.mockRejectedValueOnce(Object.assign(new Error('Set bulunamadı'), { status: 404 }));
+
+    render(<SetTakip />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Teslim Al' }));
+
+    // Hata toast'ı gösterilmeli.
+    await waitFor(() => expect(useUIStore.getState().toastMsg).toMatch(/Alet listesi sunucudan yüklenemedi/));
+
+    // "Aletler yükleniyor…" durumu temizlenmeli ve gönder butonu etkin olmalı.
+    const onaylaButonu = await screen.findByRole('button', { name: /Sayımı Onayla/i });
+    expect(onaylaButonu).not.toBeDisabled();
+    expect(screen.queryByText('Aletler yükleniyor…')).not.toBeInTheDocument();
+    // Gerçek-dal sayaç butonları (aria-label'lı) yok — mock dalı render edildi.
+    expect(screen.queryByRole('button', { name: /arttır$/ })).not.toBeInTheDocument();
+
+    // Mock dalı üzerinden kayıt çalışmalı: addTracking çağrılmaz, akış ilerler, modal kapanır.
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Salon 1' } });
+    fireEvent.change(screen.getByPlaceholderText('Dr. / Hemşire adı'), { target: { value: 'Hem. Test' } });
+    fireEvent.click(onaylaButonu);
+
+    await waitFor(() =>
+      expect(screen.queryByText('Alet Sayım Formu — Laparoskopi Seti A')).not.toBeInTheDocument()
+    );
+    expect(sterileSetsAPI.addTracking).not.toHaveBeenCalled();
+    expect(useDataStore.getState().sterilAkis[1].asama).toBe('yikamada');
+  });
+
+  it("addTracking başarısız olursa başarı gösterilmez — hata toast'ı, modal açık kalır, akış ilerlemez", async () => {
+    const { sterileSetsAPI } = await import('../../src/services/api.js');
+    sterileSetsAPI.get.mockResolvedValueOnce({
+      id: '10000000-0000-0000-0000-000000000001',
+      instruments: [{ id: 'i1', name: 'Trokar 10mm', expected_count: 1, current_count: 1 }],
+    });
+    sterileSetsAPI.addTracking.mockRejectedValueOnce(Object.assign(new Error('Yetkiniz yok'), { status: 403 }));
+    const oncekiAsama = useDataStore.getState().sterilAkis[1].asama;
+
+    render(<SetTakip />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Teslim Al' }));
+    expect(await screen.findByRole('button', { name: 'Trokar 10mm arttır' })).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Salon 1' } });
+    fireEvent.change(screen.getByPlaceholderText('Dr. / Hemşire adı'), { target: { value: 'Hem. Test' } });
+    fireEvent.click(screen.getByRole('button', { name: /Sayımı Onayla/i }));
+
+    await waitFor(() => expect(sterileSetsAPI.addTracking).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(useUIStore.getState().toastMsg).toMatch(/Sayım kaydedilemedi: Yetkiniz yok/));
+    expect(useUIStore.getState().toastMsg).not.toMatch(/teslim alındı/);
+
+    // Modal açık, akış ilerlemedi, kullanıcı tekrar deneyebilir.
+    expect(screen.getByText('Alet Sayım Formu — Laparoskopi Seti A')).toBeInTheDocument();
+    expect(useDataStore.getState().sterilAkis[1].asama).toBe(oncekiAsama);
+    const tekrarButonu = await screen.findByRole('button', { name: /Sayımı Onayla/i });
+    expect(tekrarButonu).not.toBeDisabled();
+  });
+
+  it('kayıt sürerken gönder butonu devre dışıdır (çift gönderim yok)', async () => {
+    const { sterileSetsAPI } = await import('../../src/services/api.js');
+    sterileSetsAPI.get.mockResolvedValueOnce({
+      id: '10000000-0000-0000-0000-000000000001',
+      instruments: [{ id: 'i1', name: 'Trokar 10mm', expected_count: 1, current_count: 1 }],
+    });
+    sterileSetsAPI.addTracking.mockImplementationOnce(() => new Promise(() => {}));
+
+    render(<SetTakip />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Teslim Al' }));
+    await screen.findByRole('button', { name: 'Trokar 10mm arttır' });
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Salon 1' } });
+    fireEvent.change(screen.getByPlaceholderText('Dr. / Hemşire adı'), { target: { value: 'Hem. Test' } });
+    fireEvent.click(screen.getByRole('button', { name: /Sayımı Onayla/i }));
+
+    const kaydediliyorButonu = await screen.findByRole('button', { name: /Kaydediliyor/i });
+    expect(kaydediliyorButonu).toBeDisabled();
+    fireEvent.click(kaydediliyorButonu);
+    expect(sterileSetsAPI.addTracking).toHaveBeenCalledTimes(1);
+  });
 });
