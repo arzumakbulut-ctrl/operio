@@ -295,7 +295,6 @@ export default function SesliKontrolAyarlari() {
           <label className="fl" htmlFor="sk-mock-mode">Doğrulama Senaryosu</label>
           <select
             id="sk-mock-mode"
-            aria-label="Konuşmacı Doğrulama (Demo)"
             className="fi"
             value={mockMode}
             disabled={mockConfigYukleniyor}

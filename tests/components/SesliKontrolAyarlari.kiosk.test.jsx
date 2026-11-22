@@ -75,7 +75,7 @@ describe('SesliKontrolAyarlari — Konuşmacı Doğrulama (Demo)', () => {
   it('mount olduğunda getMockConfig çağrılır ve seçici dönen mode değerine ayarlanır', async () => {
     render(<SesliKontrolAyarlari />);
 
-    const select = await screen.findByLabelText(/konuşmacı doğrulama/i);
+    const select = await screen.findByLabelText(/doğrulama senaryosu/i);
     await waitFor(() => expect(select.value).toBe('always_match'));
   });
 
@@ -84,7 +84,7 @@ describe('SesliKontrolAyarlari — Konuşmacı Doğrulama (Demo)', () => {
 
     render(<SesliKontrolAyarlari />);
 
-    const select = await screen.findByLabelText(/konuşmacı doğrulama/i);
+    const select = await screen.findByLabelText(/doğrulama senaryosu/i);
     await waitFor(() => expect(select.value).toBe('always_match'));
 
     fireEvent.change(select, { target: { value: 'always_reject_team' } });
