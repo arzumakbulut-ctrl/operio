@@ -1,16 +1,25 @@
 const router = require('express').Router();
 const { z } = require('zod');
 const { authenticate, authorize } = require('../middleware/auth');
+const { requireModule } = require('../middleware/requireModule');
 const { validate, validateQuery } = require('../middleware/validate');
 const {
   patientCreateSchema, roomCreateSchema, roomStatusSchema,
   sterileSetCreateSchema, sterileSetUpdateSchema, setTrackingSchema, paginationSchema,
+  visionCountSchema,
 } = require('../validators/schemas');
 const patientService    = require('../services/patient.service');
 const roomService       = require('../services/room.service');
-const sterileSetService = require('../services/sterileSet.service');
 const db                = require('../utils/db');
 const { ok, created, notFound, serverError } = require('../utils/response');
+
+// setRouter'daki steril set/vision rotaları servisleri registry üzerinden çağırır
+// (device.routes.js'teki getService()/setService() deseniyle aynı) — bu testlerde
+// mock inject edilebilmesini sağlar. patientRouter/roomRouter/auditRouter bu desene
+// GEÇMEDİ, doğrudan require edilen servisleri kullanmaya devam ediyor.
+const registry = require('../services/_registry');
+const getSterileSetService = () => registry.get('sterileSet', () => require('../services/sterileSet.service'));
+const getAiService = () => registry.get('ai', () => require('../services/ai.service'));
 
 // ── HASTALAR ─────────────────────────────────────────────────
 const patientRouter = require('express').Router();
@@ -94,14 +103,14 @@ setRouter.use(authenticate);
 
 setRouter.get('/', validateQuery(paginationSchema.extend({ status:z.string().optional() })), async (req,res) => {
   try {
-    const r = await sterileSetService.listSets(req.query);
+    const r = await getSterileSetService().listSets(req.query);
     return ok(res, r.sets, { total:r.total, page:r.page, totalPages:r.totalPages });
   } catch(err) { return serverError(res,err); }
 });
 
 setRouter.get('/:id', async (req,res) => {
   try {
-    const s = await sterileSetService.getSet(req.params.id);
+    const s = await getSterileSetService().getSet(req.params.id);
     if(!s) return notFound(res,'Steril Set');
     return ok(res,s);
   } catch(err) { return serverError(res,err); }
@@ -109,14 +118,14 @@ setRouter.get('/:id', async (req,res) => {
 
 setRouter.post('/', authorize(0,1,8), validate(sterileSetCreateSchema), async (req,res) => {
   try {
-    const s = await sterileSetService.createSet({ data:req.body, userId:req.user.sub, req });
+    const s = await getSterileSetService().createSet({ data:req.body, userId:req.user.sub, req });
     return created(res,s);
   } catch(err) { return serverError(res,err); }
 });
 
 setRouter.patch('/:id', authorize(0,1,8,9), validate(sterileSetUpdateSchema), async (req,res) => {
   try {
-    const s = await sterileSetService.updateSet({ id:req.params.id, data:req.body, userId:req.user.sub, req });
+    const s = await getSterileSetService().updateSet({ id:req.params.id, data:req.body, userId:req.user.sub, req });
     if(!s) return notFound(res,'Steril Set');
     return ok(res,s);
   } catch(err) { return serverError(res,err); }
@@ -124,9 +133,25 @@ setRouter.patch('/:id', authorize(0,1,8,9), validate(sterileSetUpdateSchema), as
 
 setRouter.post('/:id/tracking', authorize(0,1,8,9), validate(setTrackingSchema), async (req,res) => {
   try {
-    const log = await sterileSetService.addTrackingLog({ setId:req.params.id, ...req.body, userId:req.user.sub, req });
+    const log = await getSterileSetService().addTrackingLog({ setId:req.params.id, ...req.body, userId:req.user.sub, req });
     return created(res,log);
   } catch(err) { return serverError(res,err); }
+});
+
+// ── OPERIO VISION — Sterilizasyon alet sayımı (fotoğraf → AI tahmini) ────
+// authorize() requireModule'DEN ÖNCE çalışır: yetkisiz bir rol modül aktif olsa
+// bile hiçbir zaman requireModule'e (ve dolayısıyla modül servisine) ulaşmaz.
+setRouter.post('/:id/vision-count', authorize(0,1,8,9), requireModule('vision_counting'), validate(visionCountSchema), async (req,res) => {
+  try {
+    const set = await getSterileSetService().getSet(req.params.id);
+    if (!set) return notFound(res, 'Steril Set');
+    const result = await getAiService().countInstruments(
+      req.body.imageBase64, req.body.mediaType,
+      (set.instruments || []).map(i => ({ instrumentId: i.id, name: i.name, expectedCount: i.expected_count })),
+    );
+    await getSterileSetService().recordVisionSuggestion({ setId: req.params.id, suggestions: result.suggestions, userId: req.user.sub, req });
+    return ok(res, result);
+  } catch (err) { return serverError(res, err); }
 });
 
 // ── DENETİM GÜNLÜĞÜ ──────────────────────────────────────────

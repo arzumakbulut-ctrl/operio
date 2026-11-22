@@ -95,8 +95,25 @@ app.use(rateLimit({
 }));
 
 // ── GÖVDE AYRIŞTIRICISI ──────────────────────────────────────
+// Operio Vision fotoğrafları base64 kodlandığında 512kb limitini kolayca aşar —
+// bu route'a özel 4mb limit, aşağıdaki küresel 512kb'den ÖNCE tanımlanır (body-parser
+// bir kez req._body=true koyduktan sonra ikinci parser'ı atlar, bu yüzden sıra önemli).
+app.use('/api/sterile-sets/:id/vision-count', express.json({ limit: '4mb' }));
 app.use(express.json({ limit: '512kb' }));        // 1MB'dan daha kısıtlayıcı
 app.use(express.urlencoded({ extended: false }));
+
+// body-parser limiti aşıldığında 'entity.too.large' tipinde, status=413 bir hata
+// fırlatır — bunu gövde ayrıştırıcılarından HEMEN SONRA, genel errorHandler'a
+// (err.status/type'ı tanımadığı için 500'e düşürürdü) varmadan 413'e çeviriyoruz.
+app.use((err, req, res, next) => {
+  if (err?.type === 'entity.too.large' || err?.status === 413) {
+    return res.status(413).json({
+      success: false,
+      error: { code: 'PAYLOAD_TOO_LARGE', message: 'Gönderilen veri çok büyük' },
+    });
+  }
+  next(err);
+});
 
 // ── INPUT SANİTİZASYON ───────────────────────────────────────
 // Tüm input'lardan null-byte ve kontrol karakterlerini temizle
