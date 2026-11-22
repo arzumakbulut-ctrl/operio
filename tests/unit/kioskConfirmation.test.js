@@ -46,6 +46,30 @@ describe('kioskConfirmation.service — evet/hayır', () => {
     expect(resolvePendingConfirmation('room-unclear', 'evet', 'u1')).toEqual({ status: 'confirmed', payload });
   });
 
+  it('"evet" ile başlayan ama olumsuzlanan ifade ("evet değil") confirmed DEĞİL unresolved döner, entry SİLİNMEZ', () => {
+    const payload = { deviceId: 'd10', action: 'set_power', initiatingUserId: 'u1' };
+    createPendingConfirmation('room-yes-negated', payload);
+
+    expect(resolvePendingConfirmation('room-yes-negated', 'evet değil', 'u1')).toEqual({ status: 'unresolved' });
+    expect(resolvePendingConfirmation('room-yes-negated', 'evet', 'u1')).toEqual({ status: 'confirmed', payload });
+  });
+
+  it('"hayır" ile başlayan çok kelimeli ifade unresolved döner, entry SİLİNMEZ', () => {
+    const payload = { deviceId: 'd11', action: 'turn_off', initiatingUserId: 'u1' };
+    createPendingConfirmation('room-no-multi', payload);
+
+    expect(resolvePendingConfirmation('room-no-multi', 'hayır, yapma', 'u1')).toEqual({ status: 'unresolved' });
+    expect(resolvePendingConfirmation('room-no-multi', 'hayır', 'u1')).toEqual({ status: 'cancelled' });
+  });
+
+  it('TRADE-OFF: çok kelimeli onay ("evet lütfen") bilinçli olarak unresolved döner, entry SİLİNMEZ (güvenli taraf: kullanıcı tekrar söyler)', () => {
+    const payload = { deviceId: 'd12', action: 'set_power', initiatingUserId: 'u1' };
+    createPendingConfirmation('room-yes-polite', payload);
+
+    expect(resolvePendingConfirmation('room-yes-polite', 'evet lütfen', 'u1')).toEqual({ status: 'unresolved' });
+    expect(resolvePendingConfirmation('room-yes-polite', 'evet', 'u1')).toEqual({ status: 'confirmed', payload });
+  });
+
   it('boş veya metin olmayan cevap unresolved döner, entry SİLİNMEZ', () => {
     const payload = { deviceId: 'd5', initiatingUserId: 'u1' };
     createPendingConfirmation('room-empty', payload);

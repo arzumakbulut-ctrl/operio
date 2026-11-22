@@ -27,8 +27,12 @@
 const PENDING = new Map();
 const TTL_MS = 20000;
 
-const YES_RE = /^(evet|tamam|onaylıyorum|olur)\b/i;
-const NO_RE = /^(hayır|hayir|yok|istemiyorum|iptal)\b/i;
+// Tüm cevap tek bir yes/no kelimesi olmalı (başta VE sonda anchor). "evet değil"
+// veya "evet lütfen" gibi çok kelimeli ifadeler unresolved döner: yanlış bir
+// confirmed gerçek bir cihaz eylemini çalıştırır, yanlış unresolved ise sadece
+// kullanıcıdan tekrar istenir.
+const YES_RE = /^(evet|tamam|onaylıyorum|olur)$/i;
+const NO_RE = /^(hayır|hayir|yok|istemiyorum|iptal)$/i;
 
 function createPendingConfirmation(roomId, payload) {
   PENDING.set(roomId, { payload, expiresAt: Date.now() + TTL_MS });
