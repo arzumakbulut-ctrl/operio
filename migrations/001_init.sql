@@ -144,6 +144,7 @@ CREATE TABLE IF NOT EXISTS set_instruments (
   expected_count SMALLINT   NOT NULL DEFAULT 1,
   current_count  SMALLINT   NOT NULL DEFAULT 1
 );
+ALTER TABLE set_instruments ADD COLUMN IF NOT EXISTS last_suggested_count SMALLINT;
 
 CREATE TABLE IF NOT EXISTS surgery_sterile_sets (
   id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -402,6 +403,10 @@ INSERT INTO modules (slug, name, description, price_try, price_usd)
 VALUES ('voice_control', 'Sesli Cihaz Kontrolü', 'Ameliyathanede sesli komutla medikal cihaz kontrolü', 500000, 15000)
 ON CONFLICT (slug) DO NOTHING;
 
+INSERT INTO modules (slug, name, description, price_try, price_usd)
+VALUES ('vision_counting', 'Görsel Alet Sayımı', 'Yapay zeka ile cerrahi alet sayım doğrulaması', 400000, 12000)
+ON CONFLICT (slug) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS voice_profiles (
   id            UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id       UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -437,3 +442,41 @@ CREATE TABLE IF NOT EXISTS user_spotify_connections (
   expires_at      TIMESTAMPTZ NOT NULL,
   connected_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ── GÖRSEL ALET SAYIMI DEMO SETLERİ ──────────────────────────
+INSERT INTO sterile_sets (id, code, name, total_count, sterile_count, status) VALUES
+  ('10000000-0000-0000-0000-000000000001','VISION-DEMO-1','Laparoskopi Seti A',5,5,'STERILE'),
+  ('10000000-0000-0000-0000-000000000002','VISION-DEMO-2','Apendektomi Seti',4,0,'STERILIZING'),
+  ('10000000-0000-0000-0000-000000000003','VISION-DEMO-3','TDA Ortopedi Seti',5,5,'STERILE'),
+  ('10000000-0000-0000-0000-000000000004','VISION-DEMO-4','Boyun Cerrahi Seti',4,4,'STERILE'),
+  ('10000000-0000-0000-0000-000000000005','VISION-DEMO-5','Fakoemülsifikasyon',4,4,'STERILE'),
+  ('10000000-0000-0000-0000-000000000006','VISION-DEMO-6','Laparoskopi Seti B',4,4,'STERILE')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO set_instruments (set_id, name, expected_count) VALUES
+  ('10000000-0000-0000-0000-000000000001','Trokar 10mm',1),
+  ('10000000-0000-0000-0000-000000000001','Trokar 5mm',2),
+  ('10000000-0000-0000-0000-000000000001','Laparoskop 30°',1),
+  ('10000000-0000-0000-0000-000000000001','Grasper',1),
+  ('10000000-0000-0000-0000-000000000001','Koter Elektrotu',1),
+  ('10000000-0000-0000-0000-000000000002','Endoloop',2),
+  ('10000000-0000-0000-0000-000000000002','Trokar 5mm',2),
+  ('10000000-0000-0000-0000-000000000002','Disektör',1),
+  ('10000000-0000-0000-0000-000000000002','Grasper',1),
+  ('10000000-0000-0000-0000-000000000003','Retraktör',2),
+  ('10000000-0000-0000-0000-000000000003','Kemik Raspa',1),
+  ('10000000-0000-0000-0000-000000000003','Osteotom',3),
+  ('10000000-0000-0000-0000-000000000003','Turnike',1),
+  ('10000000-0000-0000-0000-000000000003','Çimento Karıştırıcı',1),
+  ('10000000-0000-0000-0000-000000000004','Nöromonitor Prob',1),
+  ('10000000-0000-0000-0000-000000000004','Retraktör',2),
+  ('10000000-0000-0000-0000-000000000004','Disektör',1),
+  ('10000000-0000-0000-0000-000000000004','Klip Aplikatörü',1),
+  ('10000000-0000-0000-0000-000000000005','Fakoemülsifikatör',1),
+  ('10000000-0000-0000-0000-000000000005','İrigasyon Kılıfı',1),
+  ('10000000-0000-0000-0000-000000000005','Göz Spekülümü',1),
+  ('10000000-0000-0000-0000-000000000005','BSS Kanülü',2),
+  ('10000000-0000-0000-0000-000000000006','Trokar 10mm',1),
+  ('10000000-0000-0000-0000-000000000006','Trokar 5mm',1),
+  ('10000000-0000-0000-0000-000000000006','Laparoskop 0°',1),
+  ('10000000-0000-0000-0000-000000000006','Endoloop',2);
