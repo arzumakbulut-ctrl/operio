@@ -97,7 +97,37 @@ async function request(method, path, body = null, retry = true) {
 const get    = (path)        => request('GET',    path);
 const post   = (path, body)  => request('POST',   path, body);
 const patch  = (path, body)  => request('PATCH',  path, body);
+const put    = (path, body)  => request('PUT',    path, body);
 const del    = (path)        => request('DELETE', path);
+
+// ── KİOSK İSTEK FONKSİYONU (kişisel JWT'den AYRI) ───────────
+// Kiosk token'ları kişisel JWT değildir ve refresh akışına girmez —
+// bu yüzden request()'ten tamamen ayrı, retry/refresh'siz bir
+// fetch sarmalayıcısı. Token HER ÇAĞRIDA parametre olarak gelir,
+// modülün _accessToken'ı burada ASLA okunmaz.
+async function kioskRequest(method, path, kioskToken, body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (kioskToken) headers['Authorization'] = `Bearer ${kioskToken}`;
+
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+
+  const res = await fetch(`${BASE_URL}${path}`, opts);
+
+  if (res.status === 204) return null;
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    const err = new Error(data.error?.message || 'API hatası');
+    err.code    = data.error?.code;
+    err.details = data.error?.details;
+    err.status  = res.status;
+    throw err;
+  }
+
+  return data;
+}
 
 // ── AUTH ────────────────────────────────────────────────────
 export const authAPI = {
@@ -186,6 +216,34 @@ export const moduleAPI = {
   list:     ()     => get('/billing/modules').then(r => r.data),
   mine:     ()     => get('/billing/modules/mine').then(r => r.data),
   purchase: (slug) => post(`/billing/modules/${slug}/purchase`).then(r => r.data),
+};
+
+// ── KİOSK (sesli asistan — kiosk token ile, kişisel JWT'den AYRI) ──
+export const kioskAPI = {
+  voiceCommand: (roomId, kioskToken, { transcript, audio, confirmationPhrase }) =>
+    kioskRequest('POST', `/kiosk/rooms/${roomId}/voice-command`, kioskToken, { transcript, audio, confirmationPhrase }).then(r => r.data),
+  status: (roomId, kioskToken) =>
+    kioskRequest('GET', `/kiosk/rooms/${roomId}/status`, kioskToken).then(r => r.data),
+};
+
+// ── SES PROFİLİ (konuşmacı doğrulama kaydı — kişisel JWT) ────
+export const voiceProfileAPI = {
+  enroll: (audioBase64) => post('/profile/voice-enrollment', { audio: audioBase64 }).then(r => r.data),
+  get:    ()             => get('/profile/voice-enrollment').then(r => r.data),
+};
+
+// ── SPOTIFY (OAuth bağlantısı — kişisel JWT) ─────────────────
+export const spotifyAPI = {
+  connect:    () => get('/spotify/connect').then(r => r.data),
+  disconnect: () => post('/spotify/disconnect').then(r => r.data),
+};
+
+// ── KİOSK YÖNETİMİ (admin: token üretme/iptal, mock config — kişisel JWT) ──
+export const kioskAdminAPI = {
+  createToken:   (roomId) => post(`/kiosk-admin/rooms/${roomId}/token`).then(r => r.data),
+  revokeToken:   (roomId) => post(`/kiosk-admin/rooms/${roomId}/token/revoke`).then(r => r.data),
+  getMockConfig: ()       => get('/kiosk-admin/mock-config').then(r => r.data),
+  setMockConfig: (mode)   => put('/kiosk-admin/mock-config', { mode }).then(r => r.data),
 };
 
 // ── TOKEN ERİŞİMİ (store için) ───────────────────────────────
