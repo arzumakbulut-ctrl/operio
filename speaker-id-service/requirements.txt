@@ -1,0 +1,14 @@
+# CPU-only PyTorch wheels (no CUDA needed for inference on short audio clips;
+# keeps image size and install time sane for a server deployment).
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+speechbrain==1.1.2
+torch==2.7.1
+torchaudio==2.7.1
+pydub==0.25.1
+numpy==1.26.4
+requests==2.32.3
+pytest==8.3.4
+httpx==0.28.1
