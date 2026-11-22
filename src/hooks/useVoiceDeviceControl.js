@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { kioskAPI } from '../services/api.js';
 
 // ──────────────────────────────────────────────────────────────
@@ -11,7 +11,9 @@ import { kioskAPI } from '../services/api.js';
 // ama buradaki kullanım SÜREKLİ/DÖNEN bir tampon — tek seferlik değil.
 //
 // Durum makinesi dönüş tipi `'idle' | 'listening' | 'awaiting_confirmation'
-// | 'executing' | 'no_surgery'` olarak tanımlı, ancak aşağıdaki kontrolör
+// | 'executing' | 'no_surgery' | 'setup_error'` olarak tanımlı ('setup_error':
+// status() 409 DIŞI bir hatayla — geçersiz token, modül yok, ağ — reddetti;
+// terminal durum, polling yok), ancak aşağıdaki kontrolör
 // mantığında 'listening' hiçbir yere ATANMIYOR: plan bu durum için bir
 // geçiş kuralı tanımlamıyor — sürekli dinleme zaten 'idle' iken pasif
 // olarak çalışıyor. 'listening' tip imzasında bilinçli olarak tutuldu
@@ -242,7 +244,24 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
     }
   }
 
+  // status() hatası sınıflandırması: SADECE 409 gerçek "aktif ameliyat yok"
+  // durumudur (ameliyat sonra başlayabilir → polling anlamlı). 401/403 (geçersiz/
+  // iptal edilmiş token, modül satın alınmamış), ağ hatası vb. bir YAPILANDIRMA
+  // sorunudur — bir insanın URL/token/modülü düzeltmesi gerekir, polling işe
+  // yaramaz. Bu durumlar terminal 'setup_error' durumuna gider (polling YOK).
+  function phaseForStatusError(err) {
+    return err?.status === 409 ? 'no_surgery' : 'setup_error';
+  }
+
+  // Tarayıcılar (Chrome vb.) speechSynthesis.speak() ve mikrofonu bir kullanıcı
+  // etkileşimi (tıklama/dokunma) olmadan engelliyor. Bu yüzden boru hattı
+  // mount'ta DEĞİL, Kiosk.jsx'teki "Başlat" dokunuşunun çağırdığı start() ile
+  // başlar. start() idempotent — ikinci çağrı etkisizdir.
+  const [started, setStarted] = useState(false);
+  const start = useCallback(() => setStarted(true), []);
+
   useEffect(() => {
+    if (!started) return undefined;
     unmountedRef.current = false;
     let cancelled = false;
 
@@ -252,9 +271,9 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
         if (cancelled || unmountedRef.current) return;
         setPhase('idle');
         startPipeline();
-      } catch {
+      } catch (err) {
         if (cancelled || unmountedRef.current) return;
-        setPhase('no_surgery');
+        setPhase(phaseForStatusError(err));
       }
     }
     init();
@@ -265,7 +284,7 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
       stopPipeline();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, kioskToken]);
+  }, [started, roomId, kioskToken]);
 
   useEffect(() => {
     if (state !== 'no_surgery') return undefined;
@@ -276,8 +295,12 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
         if (unmountedRef.current) return;
         setPhase('idle');
         startPipeline();
-      } catch {
-        // Hâlâ aktif ameliyat yok — bir sonraki tur'da tekrar denenecek.
+      } catch (err) {
+        if (unmountedRef.current) return;
+        // 409: hâlâ aktif ameliyat yok — bir sonraki turda tekrar denenecek.
+        // Diğer hatalar (ör. token bu arada iptal edildi): setup_error'a geç,
+        // bu da state değiştiği için polling'i durdurur.
+        if (err?.status !== 409) setPhase('setup_error');
       }
     }, NO_SURGERY_POLL_MS);
 
@@ -285,5 +308,5 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, roomId, kioskToken]);
 
-  return { state, lastResponse, pendingPhrase };
+  return { state, lastResponse, pendingPhrase, start };
 }

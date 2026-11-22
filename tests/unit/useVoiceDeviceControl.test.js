@@ -79,6 +79,10 @@ beforeEach(async () => {
   mediaRecorderInstances = [];
 
   kioskAPI = (await import('../../src/services/api.js')).kioskAPI;
+  // clearAllMocks kalıcı mockRejectedValue/mockResolvedValue varsayılanlarını
+  // SIFIRLAMAZ — testler arası sızıntıyı önlemek için açıkça reset ediyoruz.
+  kioskAPI.status.mockReset();
+  kioskAPI.voiceCommand.mockReset();
 
   vi.stubGlobal('SpeechRecognition', MockSpeechRecognition);
   vi.stubGlobal('MediaRecorder', MockMediaRecorder);
@@ -97,9 +101,16 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+// Boru hattı artık mount'ta değil, start() ile (Kiosk'taki "Başlat" dokunuşu) başlar.
+function renderStartedHook(roomId = 'room1', token = 'tok') {
+  const hook = renderHook(() => useVoiceDeviceControlModule.useVoiceDeviceControl(roomId, token));
+  act(() => { hook.result.current.start(); });
+  return hook;
+}
+
 async function renderIdleHook(roomId = 'room1', token = 'kiosk-tok') {
   kioskAPI.status.mockResolvedValueOnce({ active: true, surgeryId: 'surg1' });
-  const hook = renderHook(() => useVoiceDeviceControlModule.useVoiceDeviceControl(roomId, token));
+  const hook = renderStartedHook(roomId, token);
   await waitFor(() => expect(hook.result.current.state).toBe('idle'));
   await waitFor(() => expect(recognitionInstances.length).toBe(1));
   return hook;
@@ -111,14 +122,71 @@ beforeEach(async () => {
   useVoiceDeviceControlModule = await import('../../src/hooks/useVoiceDeviceControl.js');
 });
 
+describe('useVoiceDeviceControl — start() kapısı (kullanıcı etkileşimi)', () => {
+  it('start() çağrılmadan status() çağrılmaz ve recognition/mikrofon başlamaz', async () => {
+    kioskAPI.status.mockResolvedValue({ active: true, surgeryId: 's1' });
+
+    renderHook(() => useVoiceDeviceControlModule.useVoiceDeviceControl('room1', 'tok'));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(kioskAPI.status).not.toHaveBeenCalled();
+    expect(recognitionInstances.length).toBe(0);
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it('start() iki kez çağrılsa bile pipeline bir kez başlar (idempotent)', async () => {
+    const { result } = await renderIdleHook();
+    act(() => { result.current.start(); });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(kioskAPI.status).toHaveBeenCalledTimes(1);
+    expect(recognitionInstances.length).toBe(1);
+  });
+});
+
 describe('useVoiceDeviceControl — mount / no_surgery', () => {
   it('status() 409 ile reddederse state="no_surgery" olur ve recognition pipeline BAŞLAMAZ', async () => {
     kioskAPI.status.mockRejectedValueOnce(apiError(409, { code: 'no_active_surgery' }));
 
-    const { result } = renderHook(() => useVoiceDeviceControlModule.useVoiceDeviceControl('room1', 'tok'));
+    const { result } = renderStartedHook();
 
     await waitFor(() => expect(result.current.state).toBe('no_surgery'));
     expect(recognitionInstances.length).toBe(0);
+  });
+
+  it.each([
+    ['401 (geçersiz/iptal edilmiş token)', () => apiError(401, { code: 'invalid_kiosk_token' })],
+    ['403 (modül satın alınmamış)', () => apiError(403, { code: 'module_not_purchased' })],
+    ['ağ hatası (status yok)', () => new TypeError('Failed to fetch')],
+  ])('status() %s ile reddederse state="setup_error" olur, pipeline başlamaz ve polling YAPILMAZ', async (_label, makeErr) => {
+    vi.useFakeTimers();
+    kioskAPI.status.mockRejectedValue(makeErr());
+
+    const { result } = renderStartedHook();
+
+    await vi.waitFor(() => expect(result.current.state).toBe('setup_error'));
+    expect(recognitionInstances.length).toBe(0);
+    expect(kioskAPI.status).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(kioskAPI.status).toHaveBeenCalledTimes(1);
+    expect(result.current.state).toBe('setup_error');
+  });
+
+  it('no_surgery polling sırasında status() 409 DIŞI bir hata verirse setup_error\'a geçilir ve polling durur', async () => {
+    vi.useFakeTimers();
+    kioskAPI.status.mockRejectedValueOnce(apiError(409));
+
+    const { result } = renderStartedHook();
+    await vi.waitFor(() => expect(result.current.state).toBe('no_surgery'));
+
+    kioskAPI.status.mockRejectedValue(apiError(401));
+    await vi.advanceTimersByTimeAsync(15000);
+    await vi.waitFor(() => expect(result.current.state).toBe('setup_error'));
+    const callsAfterSwitch = kioskAPI.status.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(kioskAPI.status.mock.calls.length).toBe(callsAfterSwitch);
   });
 
   it('status() başarılı olursa state="idle" olur ve recognition + MediaRecorder pipeline başlar', async () => {
@@ -139,7 +207,7 @@ describe('useVoiceDeviceControl — mount / no_surgery', () => {
     vi.useFakeTimers();
     kioskAPI.status.mockRejectedValueOnce(apiError(409));
 
-    const { result } = renderHook(() => useVoiceDeviceControlModule.useVoiceDeviceControl('room1', 'tok'));
+    const { result } = renderStartedHook();
 
     await vi.waitFor(() => expect(result.current.state).toBe('no_surgery'));
     expect(kioskAPI.status).toHaveBeenCalledTimes(1);
@@ -155,7 +223,7 @@ describe('useVoiceDeviceControl — mount / no_surgery', () => {
     vi.useFakeTimers();
     kioskAPI.status.mockRejectedValue(apiError(409));
 
-    const { result, unmount } = renderHook(() => useVoiceDeviceControlModule.useVoiceDeviceControl('room1', 'tok'));
+    const { result, unmount } = renderStartedHook();
     await vi.waitFor(() => expect(result.current.state).toBe('no_surgery'));
 
     const callsBeforeUnmount = kioskAPI.status.mock.calls.length;
