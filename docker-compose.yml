@@ -36,6 +36,13 @@ services:
     profiles:
       - tools  # sadece: docker compose --profile tools up
 
+  # ── Speaker-ID (iç ağ, dışa port açılmaz) ────────────────
+  speaker-id:
+    build:
+      context: ./speaker-id-service
+    container_name: operio_speaker_id
+    restart: unless-stopped
+
   # ── Operio API ────────────────────────────────────────────
   api:
     build:
@@ -47,11 +54,14 @@ services:
     environment:
       DATABASE_URL: postgresql://operio:operio_secret@postgres:5432/operio_db
       NODE_ENV: production
+      SPEAKER_ID_SERVICE_URL: http://speaker-id:8001
     ports:
       - "4000:4000"
     depends_on:
       postgres:
         condition: service_healthy
+      speaker-id:
+        condition: service_started
     command: >
       sh -c "
         psql \"$$DATABASE_URL\" -f migrations/001_init.sql &&

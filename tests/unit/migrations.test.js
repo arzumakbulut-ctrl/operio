@@ -5,3 +5,8 @@ test('001_init.sql defines kiosk/voice/spotify tables', () => {
     expect(sql).toMatch(new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`));
   }
 });
+
+test("kiosk_mock_config.mode CHECK allows 'real' alongside the existing modes", () => {
+  const sql = readFileSync('migrations/001_init.sql', 'utf8');
+  expect(sql).toMatch(/CHECK \(mode IN \('always_match','always_reject_team','always_unrecognized','cycle','real'\)\)/);
+});
