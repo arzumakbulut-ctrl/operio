@@ -2,109 +2,100 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 
 const { createPendingConfirmation, resolvePendingConfirmation } = await import('../../src/services/kioskConfirmation.service.js');
 
-// Yanlış ama phrase ile ÇAKIŞMAYAN bir karşı-phrase üretir (rastgele üretimle çakışma
-// riskini sıfırlar — ilk rakamı 1 artırıp mod 10 alır).
-function wrongPhraseFor(phrase) {
-  const [a, b, c] = phrase.split('-').map(Number);
-  return `${(a + 1) % 10}-${b}-${c}`;
-}
+const TTL_MS = 20000;
 
 afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('kioskConfirmation.service', () => {
-  it('createPendingConfirmation \\d-\\d-\\d formatında bir phrase üretir', () => {
-    const { phrase } = createPendingConfirmation('room-format', { foo: 'bar' });
-    expect(phrase).toMatch(/^\d-\d-\d$/);
+describe('kioskConfirmation.service — evet/hayır', () => {
+  it('createPendingConfirmation artık phrase döndürmez', () => {
+    expect(createPendingConfirmation('room-no-phrase', { deviceId: 'd0' })).toEqual({});
   });
 
-  it('doğru phrase ile resolvePendingConfirmation payload döner VE entry silinir (ikinci çağrıda null)', () => {
-    const payload = { deviceId: 'dev-1', action: 'turn_on', value: undefined };
-    const { phrase } = createPendingConfirmation('room-ok', payload);
+  it('"evet" diyen başlatan kişiye confirmed+payload döner, entry silinir', () => {
+    const payload = { deviceId: 'd1', action: 'set_power', value: 20, initiatingUserId: 'u1' };
+    createPendingConfirmation('room-yes', payload);
 
-    const result = resolvePendingConfirmation('room-ok', phrase);
-    expect(result).toEqual(payload);
-
-    // Entry başarılı eşleşmede silinmiş olmalı — ikinci çağrı null döner.
-    expect(resolvePendingConfirmation('room-ok', phrase)).toBeNull();
+    expect(resolvePendingConfirmation('room-yes', 'evet', 'u1')).toEqual({ status: 'confirmed', payload });
+    // tek kullanımlık
+    expect(resolvePendingConfirmation('room-yes', 'evet', 'u1')).toBeNull();
   });
 
-  it('yanlış phrase ile null döner (entry silinmez — doğru phrase sonradan hâlâ işe yarar)', () => {
-    const payload = { deviceId: 'dev-2', action: 'turn_off' };
-    const { phrase } = createPendingConfirmation('room-wrong', payload);
+  it('"hayır" diyen başlatan kişiye cancelled döner, entry silinir', () => {
+    createPendingConfirmation('room-no', { deviceId: 'd2', action: 'turn_off', initiatingUserId: 'u1' });
 
-    expect(resolvePendingConfirmation('room-wrong', wrongPhraseFor(phrase))).toBeNull();
-
-    // Yanlış denemeden sonra entry hâlâ yerinde olmalı — doğru phrase hâlâ çalışır.
-    expect(resolvePendingConfirmation('room-wrong', phrase)).toEqual(payload);
+    expect(resolvePendingConfirmation('room-no', 'hayır', 'u1')).toEqual({ status: 'cancelled' });
+    expect(resolvePendingConfirmation('room-no', 'evet', 'u1')).toBeNull();
   });
 
-  it('expiresAt geçmişse doğru phrase bile olsa null döner (zaman mocklanır)', () => {
+  it('ASCII "hayir" ve büyük harf "EVET" da tanınır (trim+lowercase)', () => {
+    createPendingConfirmation('room-ascii-no', { initiatingUserId: 'u1' });
+    expect(resolvePendingConfirmation('room-ascii-no', '  Hayir  ', 'u1')).toEqual({ status: 'cancelled' });
+
+    const payload = { deviceId: 'd3', initiatingUserId: 'u1' };
+    createPendingConfirmation('room-upper-yes', payload);
+    expect(resolvePendingConfirmation('room-upper-yes', 'EVET', 'u1')).toEqual({ status: 'confirmed', payload });
+  });
+
+  it('anlaşılmaz bir metin (ör. "ne dedin") unresolved döner, entry SİLİNMEZ', () => {
+    const payload = { deviceId: 'd4', action: 'set_power', initiatingUserId: 'u1' };
+    createPendingConfirmation('room-unclear', payload);
+
+    expect(resolvePendingConfirmation('room-unclear', 'ne dedin', 'u1')).toEqual({ status: 'unresolved' });
+    expect(resolvePendingConfirmation('room-unclear', 'evet', 'u1')).toEqual({ status: 'confirmed', payload });
+  });
+
+  it('boş veya metin olmayan cevap unresolved döner, entry SİLİNMEZ', () => {
+    const payload = { deviceId: 'd5', initiatingUserId: 'u1' };
+    createPendingConfirmation('room-empty', payload);
+
+    expect(resolvePendingConfirmation('room-empty', '', 'u1')).toEqual({ status: 'unresolved' });
+    expect(resolvePendingConfirmation('room-empty', undefined, 'u1')).toEqual({ status: 'unresolved' });
+    expect(resolvePendingConfirmation('room-empty', 'evet', 'u1')).toEqual({ status: 'confirmed', payload });
+  });
+
+  it('başlatan kişi dışında biri "evet" derse unresolved döner, entry SİLİNMEZ', () => {
+    const payload = { deviceId: 'd6', action: 'set_power', initiatingUserId: 'u1' };
+    createPendingConfirmation('room-wrong-speaker', payload);
+
+    expect(resolvePendingConfirmation('room-wrong-speaker', 'evet', 'u2')).toEqual({ status: 'unresolved' });
+    expect(resolvePendingConfirmation('room-wrong-speaker', 'hayır', 'u2')).toEqual({ status: 'unresolved' });
+    expect(resolvePendingConfirmation('room-wrong-speaker', 'evet', 'u1')).toEqual({ status: 'confirmed', payload });
+  });
+
+  it('initiatingUserId yoksa konuşmacı kontrolü yapılmaz', () => {
+    const payload = { deviceId: 'd7', action: 'turn_on' };
+    createPendingConfirmation('room-no-initiator', payload);
+
+    expect(resolvePendingConfirmation('room-no-initiator', 'tamam', undefined)).toEqual({ status: 'confirmed', payload });
+  });
+
+  it('süre dolmadan hemen önce "evet" hâlâ confirmed döner (TTL 20sn)', () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const start = Date.parse('2026-01-01T00:00:00Z');
+    vi.setSystemTime(new Date(start));
 
-    const payload = { deviceId: 'dev-3', action: 'set_power', value: 50 };
-    const { phrase } = createPendingConfirmation('room-expired', payload);
+    const payload = { deviceId: 'd8', initiatingUserId: 'u1' };
+    createPendingConfirmation('room-ttl-edge', payload);
 
-    // TTL 10sn — 10sn + 1ms ileri sar.
-    vi.setSystemTime(new Date('2026-01-01T00:00:10.001Z'));
-
-    expect(resolvePendingConfirmation('room-expired', phrase)).toBeNull();
+    vi.setSystemTime(new Date(start + TTL_MS - 1));
+    expect(resolvePendingConfirmation('room-ttl-edge', 'evet', 'u1')).toEqual({ status: 'confirmed', payload });
   });
 
-  it('hiç bekleyen onay olmayan bir roomId için null döner', () => {
-    expect(resolvePendingConfirmation('room-never-existed', '1-2-3')).toBeNull();
+  it('süre dolduktan sonra "evet" gelirse null döner, entry silinir', () => {
+    vi.useFakeTimers();
+    const start = Date.parse('2026-01-01T00:00:00Z');
+    vi.setSystemTime(new Date(start));
+
+    createPendingConfirmation('room-expired', { deviceId: 'd9', initiatingUserId: 'u1' });
+
+    vi.setSystemTime(new Date(start + TTL_MS + 1));
+    expect(resolvePendingConfirmation('room-expired', 'evet', 'u1')).toBeNull();
+    expect(resolvePendingConfirmation('room-expired', 'evet', 'u1')).toBeNull();
   });
 
-  describe('rakam-tabanlı karşılaştırma (saklanan "4-7-2" formatı korunur)', () => {
-    // Math.random 0.4/0.7/0.2 → floor(x*10) = 4/7/2 → phrase "4-7-2".
-    function create472(roomId, payload) {
-      const spy = vi.spyOn(Math, 'random').mockReturnValueOnce(0.4).mockReturnValueOnce(0.7).mockReturnValueOnce(0.2);
-      const { phrase } = createPendingConfirmation(roomId, payload);
-      spy.mockRestore();
-      return phrase;
-    }
-
-    it('saklanan "4-7-2" ↔ gelen "4 7 2" eşleşir', () => {
-      const payload = { deviceId: 'dev-n1', action: 'turn_on' };
-      const phrase = create472('room-norm-space', payload);
-
-      expect(phrase).toBe('4-7-2'); // saklanan/okunan format değişmedi
-      expect(resolvePendingConfirmation('room-norm-space', '4 7 2')).toEqual(payload);
-    });
-
-    it('saklanan "4-7-2" ↔ gelen "472" eşleşir', () => {
-      const payload = { deviceId: 'dev-n2', action: 'turn_on' };
-      create472('room-norm-compact', payload);
-
-      expect(resolvePendingConfirmation('room-norm-compact', '472')).toEqual(payload);
-    });
-
-    it('gerçekten yanlış bir dizi hâlâ reddedilir (ve entry silinmez)', () => {
-      const payload = { deviceId: 'dev-n3', action: 'turn_on' };
-      create472('room-norm-wrong', payload);
-
-      expect(resolvePendingConfirmation('room-norm-wrong', '4 7 3')).toBeNull();
-      expect(resolvePendingConfirmation('room-norm-wrong', '47')).toBeNull();
-      expect(resolvePendingConfirmation('room-norm-wrong', '274')).toBeNull();
-      expect(resolvePendingConfirmation('room-norm-wrong', '4721')).toBeNull();
-      expect(resolvePendingConfirmation('room-norm-wrong', 'dört yedi iki')).toBeNull(); // rakam yok → boş → asla eşleşmez
-      expect(resolvePendingConfirmation('room-norm-wrong', '')).toBeNull();
-      // Yanlış denemeler entry'yi silmedi — doğru dizi hâlâ çalışır.
-      expect(resolvePendingConfirmation('room-norm-wrong', '4-7-2')).toEqual(payload);
-    });
-  });
-
-  describe('konuşmacı bağlama (initiatingUserId)', () => {
-    it('payload.initiatingUserId varsa, FARKLI bir konuşmacı doğru phrase ile bile çözemez (entry silinmez)', () => {
-      const payload = { deviceId: 'dev-s1', action: 'turn_on', initiatingUserId: 'nurse-a' };
-      const { phrase } = createPendingConfirmation('room-speaker', payload);
-
-      expect(resolvePendingConfirmation('room-speaker', phrase, 'nurse-b')).toBeNull();
-      expect(resolvePendingConfirmation('room-speaker', phrase)).toBeNull(); // onaylayan bilinmiyorsa da red
-      // Asıl başlatan kişi hâlâ onaylayabilir.
-      expect(resolvePendingConfirmation('room-speaker', phrase, 'nurse-a')).toEqual(payload);
-    });
+  it('hiç bekleyen onay yoksa null döner', () => {
+    expect(resolvePendingConfirmation('oda-yok', 'evet', 'u1')).toBeNull();
   });
 });
