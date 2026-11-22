@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createRequire } from 'node:module';
 import registry from '../../src/services/_registry.js';
 
-const { kioskSpeakerAuth } = await import('../../src/middleware/kioskSpeakerAuth.js');
+const { kioskSpeakerAuth, getSpeakerVerifier } = await import('../../src/middleware/kioskSpeakerAuth.js');
+// Middleware CJS require() ile yüklüyor; instanceof'un aynı sınıf örneğini görmesi için
+// test de aynı CJS modül cache'inden yükler (ESM import ayrı bir örnek üretebilir).
+const require = createRequire(import.meta.url);
+const { RealSpeakerVerifier } = require('../../src/drivers/RealSpeakerVerifier.js');
+const { MockSpeakerVerifier } = require('../../src/drivers/MockSpeakerVerifier.js');
 
 const mockKioskService = {
   getMockConfig: vi.fn(),
@@ -31,6 +37,21 @@ function makeReq({ surgeryTeams } = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   registry.register('kiosk', mockKioskService);
+});
+
+describe('getSpeakerVerifier dispatch', () => {
+  it('config.mode === "real" ise RealSpeakerVerifier döner', () => {
+    expect(getSpeakerVerifier({ mode: 'real' })).toBeInstanceOf(RealSpeakerVerifier);
+  });
+
+  it('config.mode demo modlarından biriyse MockSpeakerVerifier döner', () => {
+    expect(getSpeakerVerifier({ mode: 'always_match' })).toBeInstanceOf(MockSpeakerVerifier);
+    expect(getSpeakerVerifier({ mode: 'cycle' })).toBeInstanceOf(MockSpeakerVerifier);
+  });
+
+  it('config verilmezse (zero-arg) MockSpeakerVerifier döner — demo davranışı korunur', () => {
+    expect(getSpeakerVerifier()).toBeInstanceOf(MockSpeakerVerifier);
+  });
 });
 
 describe('kioskSpeakerAuth', () => {
