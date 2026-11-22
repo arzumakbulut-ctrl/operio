@@ -44,15 +44,26 @@ function norm(a) {
 
 /**
  * cosineSimilarity — iki vektör arasındaki cosine-similarity skoru
- * (dot(a,b) / (norm(a) * norm(b))). SAF (pure) fonksiyon. Sıfır-vektör
- * (norm 0) durumunda bölme-by-zero'ya düşmemek için 0 döner — bu, pratikte
- * gerçek embedding'lerde beklenmeyen dejenere bir durumdur ve "eşleşme yok"
- * olarak ele alınması güvenli tarafta kalır.
+ * (dot(a,b) / (norm(a) * norm(b))). SAF (pure) fonksiyon.
+ *
+ * İki güvenlik koruması vardır (her ikisi de "belirsizse eşleşme yok"
+ * ilkesiyle, bu dosyanın anti-false-accept amacına uygun):
+ *  - Uzunluk uyuşmazlığı (örn. bir model-version yükseltmesi sonrası
+ *    yeniden enroll edilmemiş eski bir profil — bkz.
+ *    voiceProfile.service.js'teki MODEL_VERSION) `dot()`'un kısa vektörün
+ *    sonundan sonra `undefined` ile çarpıp NaN üretmesine yol açabilir; bu
+ *    durum burada 0 (eşleşme yok) olarak ele alınır, NaN'ın
+ *    `identify()`'daki eşik karşılaştırmasını (`NaN < threshold === false`)
+ *    atlatıp sahte bir "eşleşme" üretmesi ÖNLENİR.
+ *  - Sıfır-vektör (norm 0) durumunda bölme-by-zero'ya düşmemek için de 0
+ *    döner — pratikte gerçek embedding'lerde beklenmeyen dejenere bir
+ *    durumdur.
  * @param {number[]} a
  * @param {number[]} b
  * @returns {number}
  */
 function cosineSimilarity(a, b) {
+  if (a.length !== b.length) return 0;
   const denominator = norm(a) * norm(b);
   if (denominator === 0) return 0;
   return dot(a, b) / denominator;
@@ -66,9 +77,17 @@ function cosineSimilarity(a, b) {
  *
  * Tasarım ilkesi (bu özelliğin anti-goal'ü): bir false-accept (yanlış
  * kullanıcıyla güvenle eşleşme) kabul edilemez bir hata modudur. Bu yüzden
- * her belirsiz/eksik veri durumunda (ses yok, aday yok, kimse enroll
- * olmamış, en yüksek skor eşik altında) `identify` kesinlikle FIRLATMADAN
- * null ("tanınamadı") döner — asla düşük-güvenli bir tahminle yanıt vermez.
+ * her belirsiz/eksik/hatalı veri durumunda (ses yok, aday yok, kimse enroll
+ * olmamış, en yüksek skor eşik altında, bağımlılıklardan biri fırlatırsa —
+ * örn. DB bağlantısı düşerse) `identify` kesinlikle FIRLATMADAN null
+ * ("tanınamadı") döner — asla düşük-güvenli bir tahminle yanıt vermez.
+ * `speakerIdClient.getEmbedding` zaten kendi içinde asla fırlamaz (bkz. o
+ * dosyanın kendi dokümantasyonu); buradaki try/catch savunma-derinliği
+ * içindir. `voiceProfile.service.getEmbeddingsForUsers` ise kendi içinde
+ * `db.query`'yi try/catch'siz çağırır — bir bağlantı hatası/timeout onun
+ * promise'ini reddeder (reject) — bu yüzden buradaki try/catch bu dosyanın
+ * "asla fırlatmaz" garantisini korumak için GEREKLİDİR, sadece savunma
+ * amaçlı değildir.
  */
 class RealSpeakerVerifier extends SpeakerVerifier {
   async identify(audioBuffer, candidateUserIds, config) {
@@ -76,12 +95,22 @@ class RealSpeakerVerifier extends SpeakerVerifier {
       return null;
     }
 
-    const queryEmbedding = await speakerIdClient.getEmbedding(audioBuffer);
+    let queryEmbedding;
+    try {
+      queryEmbedding = await speakerIdClient.getEmbedding(audioBuffer);
+    } catch {
+      return null;
+    }
     if (!queryEmbedding) {
       return null;
     }
 
-    const enrolled = await voiceProfileService.getEmbeddingsForUsers(candidateUserIds);
+    let enrolled;
+    try {
+      enrolled = await voiceProfileService.getEmbeddingsForUsers(candidateUserIds);
+    } catch {
+      return null;
+    }
     if (!enrolled || enrolled.length === 0) {
       return null;
     }
@@ -94,7 +123,13 @@ class RealSpeakerVerifier extends SpeakerVerifier {
       }
     }
 
-    if (!best || best.score < MATCH_THRESHOLD) {
+    // Number.isNaN: savunma-derinliği. cosineSimilarity kendi içinde
+    // uzunluk-uyuşmazlığı/sıfır-norm durumlarını zaten 0'a indirger, ama bu
+    // ek kontrol NaN'ın (hangi yoldan gelirse gelsin) "NaN < threshold"
+    // false değerlendirmesiyle eşik kontrolünü atlatıp sahte bir eşleşme
+    // üretmesine karşı son bir güvenlik ağıdır (bkz. anti-false-accept
+    // amacı).
+    if (!best || Number.isNaN(best.score) || best.score < MATCH_THRESHOLD) {
       return null;
     }
 

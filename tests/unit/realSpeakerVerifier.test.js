@@ -105,4 +105,50 @@ describe('RealSpeakerVerifier.identify', () => {
     expect(result).toBeNull();
     expect(fakeGetEmbeddingsForUsers).not.toHaveBeenCalled();
   });
+
+  // --- Review follow-up fixes (Important #1 ve #2) ---
+
+  it('getEmbeddingsForUsers reddederse (DB bağlantısı düşerse/timeout) fırlatmadan null döner', async () => {
+    fakeGetEmbedding.mockResolvedValue([1, 0]);
+    fakeGetEmbeddingsForUsers.mockRejectedValue(new Error('ECONNREFUSED'));
+
+    const verifier = new RealSpeakerVerifier();
+    await expect(verifier.identify('audio-base64', ['u1', 'u2'], {})).resolves.toBeNull();
+  });
+
+  it('getEmbedding reddederse (savunma-derinliği) fırlatmadan null döner', async () => {
+    fakeGetEmbedding.mockRejectedValue(new Error('network down'));
+
+    const verifier = new RealSpeakerVerifier();
+    await expect(verifier.identify('audio-base64', ['u1'], {})).resolves.toBeNull();
+    expect(fakeGetEmbeddingsForUsers).not.toHaveBeenCalled();
+  });
+
+  it('kayıtlı embedding uzunluğu sorgu embedding\'inden farklıysa (model-version uyuşmazlığı) NaN confidence\'lı sahte bir eşleşme DÖNDÜRMEZ, null döner', async () => {
+    // query 3 boyutlu, u1'in kayıtlı profili 2 boyutlu (eski model_version'dan kalmış,
+    // yeniden enroll edilmemiş) — dot()'un `undefined` ile çarpıp NaN üretebileceği senaryo.
+    fakeGetEmbedding.mockResolvedValue([1, 0, 0]);
+    fakeGetEmbeddingsForUsers.mockResolvedValue([
+      { userId: 'u1', embedding: [1, 0] },
+    ]);
+
+    const verifier = new RealSpeakerVerifier();
+    const result = await verifier.identify('audio-base64', ['u1'], {});
+
+    expect(result).toBeNull();
+  });
+
+  it('uzunluk uyuşmazlığı olan aday varken, uzunluğu TUTAN başka bir aday eşik üstündeyse o aday normal şekilde döner', async () => {
+    // Review Focus: uzunluk-uyuşmazlığı koruması diğer adayların normal değerlendirilmesini bozmamalı.
+    fakeGetEmbedding.mockResolvedValue([1, 0]);
+    fakeGetEmbeddingsForUsers.mockResolvedValue([
+      { userId: 'u1', embedding: [1, 0, 0] }, // uzunluk uyuşmazlığı → 0 (eşleşme yok)
+      { userId: 'u2', embedding: [1, 0] }, // tam eşleşme → 1
+    ]);
+
+    const verifier = new RealSpeakerVerifier();
+    const result = await verifier.identify('audio-base64', ['u1', 'u2'], {});
+
+    expect(result).toEqual({ userId: 'u2', confidence: 1 });
+  });
 });
