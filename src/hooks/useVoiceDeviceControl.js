@@ -59,7 +59,6 @@ function extractCommandAfterWakeWord(transcriptSegment) {
 export function useVoiceDeviceControl(roomId, kioskToken) {
   const [state, setState] = useState('idle');
   const [lastResponse, setLastResponse] = useState(null);
-  const [pendingPhrase, setPendingPhrase] = useState(null);
 
   // phaseRef, `state`'in senkron bir yansısı — SpeechRecognition'ın onresult/
   // onend callback'leri bir kez oluşturulup kalıcı olduğu için (closure), bu
@@ -187,7 +186,7 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
       const response = await kioskAPI.voiceCommand(roomId, kioskToken, { ...payload, audio: audioBase64 });
       handleResponse(response);
     } catch (err) {
-      handleError(err, { isConfirmationCall: !!payload.confirmationPhrase });
+      handleError(err, { isConfirmationCall: !!payload.confirmationAnswer });
     }
   }
 
@@ -199,21 +198,21 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
       // çağrıları zaten sıraya aldığı için art arda iki speak() çağrısı
       // yeterli (ikinciyi onend'e bağlamaya gerek yok) — bilinçli tercih.
       response.say.forEach((sentence) => speak(sentence));
-      setPendingPhrase(null);
       setPhase('idle');
       return;
     }
 
     if (response?.status === 'pending_confirmation') {
-      setPendingPhrase(response.phrase);
+      // say:null → belirsiz (ambiguous), hiçbir şey okunmadan awaiting_confirmation'da
+      // kalınır. speak() zaten falsy metinde no-op olduğu için ek bir dallanma gerekmez.
       setPhase('awaiting_confirmation');
       speak(response.say);
       return;
     }
 
-    // Diğer tüm tek adımlı yanıtlar: DEVICE_COMMAND (status'suz),
-    // SPOTIFY_PLAY, WEB_SEARCH, UNKNOWN, ya da onay sonrası final DEVICE_COMMAND.
-    setPendingPhrase(null);
+    // Diğer tüm tek adımlı yanıtlar: DEVICE_COMMAND (status'suz — "Komut iptal
+    // edildi." dahil), SPOTIFY_PLAY, WEB_SEARCH, UNKNOWN, ya da onay sonrası
+    // final DEVICE_COMMAND.
     speak(response?.say);
     setPhase('idle');
   }
@@ -221,7 +220,6 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
   function handleError(err, { isConfirmationCall } = {}) {
     if (isConfirmationCall && err?.code === 'confirmation_mismatch') {
       speak(err.message);
-      setPendingPhrase(null);
       setPhase('idle');
       return;
     }
@@ -229,14 +227,12 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
     if (err?.status === 403) {
       // Backend mesajı zaten tam bir Türkçe cümle — direkt okunur.
       speak(err.message);
-      setPendingPhrase(null);
       setPhase('idle');
       return;
     }
 
     if (err?.status === 409) {
       speak(SURGERY_ENDED_MESSAGE);
-      setPendingPhrase(null);
       setPhase('no_surgery');
       // Ameliyat bittiyse dinleme hattının açık kalmasının bir anlamı yok —
       // mikrofonu/recognition'ı burada aktif olarak durduruyoruz (plan sadece
@@ -247,7 +243,6 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
     }
 
     speak(GENERIC_ERROR_MESSAGE);
-    setPendingPhrase(null);
     setPhase('idle');
   }
 
@@ -260,7 +255,7 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
     // Ses tamponu (latestAudioChunkRef) sendVoiceCommand() içinde okunuyor —
     // bu, o anki en son 3 saniyelik parçayı "bu ifadenin sesi" olarak alır.
     if (phaseRef.current === 'awaiting_confirmation') {
-      sendVoiceCommand({ transcript: commandText, confirmationPhrase: commandText });
+      sendVoiceCommand({ transcript: commandText, confirmationAnswer: commandText });
     } else {
       sendVoiceCommand({ transcript: commandText });
     }
@@ -330,5 +325,5 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, roomId, kioskToken]);
 
-  return { state, lastResponse, pendingPhrase, start };
+  return { state, lastResponse, start };
 }

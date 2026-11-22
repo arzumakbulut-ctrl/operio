@@ -91,21 +91,20 @@ function voiceCommandCalls() {
 }
 
 describe('Kiosk sözleşme testi (yalnızca fetch stub\'lı)', () => {
-  it('cihaz komutu → pending_confirmation → onay ifadesi: İKİNCİ voice-command isteğinin gövdesi confirmationPhrase içerir', async () => {
+  it('cihaz komutu → pending_confirmation → onay ifadesi: İKİNCİ voice-command isteğinin gövdesi confirmationAnswer içerir', async () => {
     fetchMock.mockImplementation(async (url, opts) => {
       if (String(url).endsWith('/kiosk/rooms/room1/status')) {
         return jsonResponse(200, { success: true, data: { active: true, surgeryId: 'surg-1' } });
       }
       if (String(url).endsWith('/kiosk/rooms/room1/voice-command')) {
         const body = JSON.parse(opts.body);
-        if (!body.confirmationPhrase) {
+        if (!body.confirmationAnswer) {
           return jsonResponse(200, {
             success: true,
             data: {
               type: 'DEVICE_COMMAND',
               status: 'pending_confirmation',
-              phrase: '4-7-2',
-              say: 'Onaylamak için şu rakamları tekrar söyleyin: 4-7-2',
+              say: 'Koteri açmak istediğinize eminmisiniz?',
             },
           });
         }
@@ -134,21 +133,21 @@ describe('Kiosk sözleşme testi (yalnızca fetch stub\'lı)', () => {
     expect(voiceCommandCalls()[0][1].method).toBe('POST');
     expect(voiceCommandCalls()[0][1].headers.Authorization).toBe('Bearer kiosk-tok');
     expect(firstBody.transcript).toBe('koteri aç');
-    expect(firstBody.confirmationPhrase).toBeUndefined();
+    expect(firstBody.confirmationAnswer).toBeUndefined();
 
     // Zarf ({success,data}) doğru açıldı mı: pending_confirmation say metni okunur + ekranda görünür.
     await waitFor(() => expect(speakMock.mock.calls.map((c) => c[0].text))
-      .toContain('Onaylamak için şu rakamları tekrar söyleyin: 4-7-2'));
+      .toContain('Koteri açmak istediğinize eminmisiniz?'));
     expect(await screen.findByText(/awaiting_confirmation/)).toBeInTheDocument();
 
     // 2) Onay ifadesi (uyandırma kelimesiyle birlikte söylenir).
-    act(() => { recognitionInstances[0].onresult(finalResult('Operio 4 7 2')); });
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio evet')); });
 
     await waitFor(() => expect(voiceCommandCalls().length).toBe(2));
     const secondBody = JSON.parse(voiceCommandCalls()[1][1].body);
     // NOT: `transcript` içeriği bilinçli olarak sabitlenmiyor — backend,
-    // confirmationPhrase varken transcript'i yok sayacak şekilde düzeltiliyor.
-    expect(secondBody).toHaveProperty('confirmationPhrase', '4 7 2');
+    // confirmationAnswer varken transcript'i yok sayacak şekilde düzeltiliyor.
+    expect(secondBody).toHaveProperty('confirmationAnswer', 'evet');
 
     // Final yanıt okunur ve hook idle'a döner.
     await waitFor(() => expect(speakMock.mock.calls.map((c) => c[0].text)).toContain('Komut uygulandı.'));

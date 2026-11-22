@@ -382,22 +382,21 @@ describe('useVoiceDeviceControl — yanıt tipleri', () => {
     expect(result.current.lastResponse).toEqual({ type: 'TIMEOUT', say: ['Sizi dinleyemedim.', 'Tekrar deneyin.'] });
   });
 
-  it('pending_confirmation yanıtı: state="awaiting_confirmation", pendingPhrase dolu, say okunur', async () => {
+  it('pending_confirmation yanıtı: state="awaiting_confirmation", say okunur', async () => {
     kioskAPI.voiceCommand.mockResolvedValueOnce({
-      type: 'DEVICE_COMMAND', status: 'pending_confirmation', phrase: '4-7-2', say: 'Onaylamak için 4-7-2 deyin',
+      type: 'DEVICE_COMMAND', status: 'pending_confirmation', say: 'Koteri açmak istediğinize eminmisiniz?',
     });
     const { result } = await renderIdleHook();
 
     act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
 
     await waitFor(() => expect(result.current.state).toBe('awaiting_confirmation'));
-    expect(result.current.pendingPhrase).toBe('4-7-2');
-    expect(lastSpokenText()).toBe('Onaylamak için 4-7-2 deyin');
+    expect(lastSpokenText()).toBe('Koteri açmak istediğinize eminmisiniz?');
   });
 
-  it('awaiting_confirmation sırasında bir sonraki uyandırma-komutu confirmationPhrase ile İKİNCİ voiceCommand çağrısını tetikler', async () => {
+  it('awaiting_confirmation sırasında bir sonraki uyandırma-komutu confirmationAnswer ile İKİNCİ voiceCommand çağrısını tetikler', async () => {
     kioskAPI.voiceCommand.mockResolvedValueOnce({
-      type: 'DEVICE_COMMAND', status: 'pending_confirmation', phrase: '4-7-2', say: 'Onaylamak için 4-7-2 deyin',
+      type: 'DEVICE_COMMAND', status: 'pending_confirmation', say: 'Koteri açmak istediğinize eminmisiniz?',
     });
     const { result } = await renderIdleHook();
 
@@ -405,21 +404,49 @@ describe('useVoiceDeviceControl — yanıt tipleri', () => {
     await waitFor(() => expect(result.current.state).toBe('awaiting_confirmation'));
 
     kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', say: 'Koter açıldı', device: { id: 'd1' } });
-    act(() => { recognitionInstances[0].onresult(finalResult('Operio 4 7 2')); });
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio evet')); });
 
     await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(2));
     expect(kioskAPI.voiceCommand).toHaveBeenNthCalledWith(
       2, 'room1', 'kiosk-tok',
-      expect.objectContaining({ transcript: '4 7 2', confirmationPhrase: '4 7 2' })
+      expect.objectContaining({ transcript: 'evet', confirmationAnswer: 'evet' })
     );
 
     await waitFor(() => expect(result.current.state).toBe('idle'));
     expect(lastSpokenText()).toBe('Koter açıldı');
   });
 
-  it('ikinci çağrı confirmation_mismatch (400) ile reddederse hata mesajı okunur, state idle, pendingPhrase temizlenir', async () => {
+  it('backend say:null ile pending_confirmation dönerse hiçbir şey seslendirilmez, awaiting_confirmation\'da kalınır', async () => {
     kioskAPI.voiceCommand.mockResolvedValueOnce({
-      type: 'DEVICE_COMMAND', status: 'pending_confirmation', phrase: '4-7-2', say: 'Onaylamak için 4-7-2 deyin',
+      type: 'DEVICE_COMMAND', status: 'pending_confirmation', say: null,
+    });
+    const { result } = await renderIdleHook();
+
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
+
+    await waitFor(() => expect(result.current.state).toBe('awaiting_confirmation'));
+    expect(speakMock).not.toHaveBeenCalled();
+  });
+
+  it('backend "Komut iptal edildi." ile normal (status\'suz) yanıt dönerse idle\'a geçilir ve mesaj seslendirilir', async () => {
+    kioskAPI.voiceCommand.mockResolvedValueOnce({
+      type: 'DEVICE_COMMAND', status: 'pending_confirmation', say: 'Koteri açmak istediğinize eminmisiniz?',
+    });
+    const { result } = await renderIdleHook();
+
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
+    await waitFor(() => expect(result.current.state).toBe('awaiting_confirmation'));
+
+    kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', say: 'Komut iptal edildi.' });
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio hayır')); });
+
+    await waitFor(() => expect(result.current.state).toBe('idle'));
+    expect(lastSpokenText()).toBe('Komut iptal edildi.');
+  });
+
+  it('ikinci çağrı confirmation_mismatch (400) ile reddederse hata mesajı okunur, state idle\'a döner', async () => {
+    kioskAPI.voiceCommand.mockResolvedValueOnce({
+      type: 'DEVICE_COMMAND', status: 'pending_confirmation', say: 'Koteri açmak istediğinize eminmisiniz?',
     });
     const { result } = await renderIdleHook();
 
@@ -430,7 +457,6 @@ describe('useVoiceDeviceControl — yanıt tipleri', () => {
     act(() => { recognitionInstances[0].onresult(finalResult('Operio yanlış cümle')); });
 
     await waitFor(() => expect(result.current.state).toBe('idle'));
-    expect(result.current.pendingPhrase).toBeNull();
     expect(lastSpokenText()).toBe('Onay cümlesi hatalı veya süresi geçti.');
   });
 
