@@ -16,6 +16,7 @@ vi.mock('../../src/services/api.js', () => ({
 // amaç Kiosk.jsx'in hook çıktısını doğru render ettiğini VE hook'un
 // speechSynthesis'i gerçekten tetiklediğini uçtan uca doğrulamak.
 let recognitionInstances = [];
+let mediaRecorderInstances = [];
 let speakMock;
 
 class MockSpeechRecognition {
@@ -32,7 +33,12 @@ class MockSpeechRecognition {
 }
 
 class MockMediaRecorder {
-  constructor(stream) { this.stream = stream; this.state = 'inactive'; this.ondataavailable = null; }
+  constructor(stream) {
+    this.stream = stream;
+    this.state = 'inactive';
+    this.ondataavailable = null;
+    mediaRecorderInstances.push(this);
+  }
   start() { this.state = 'recording'; }
   stop() { this.state = 'inactive'; }
 }
@@ -49,6 +55,7 @@ let kioskAPI;
 beforeEach(async () => {
   vi.clearAllMocks();
   recognitionInstances = [];
+  mediaRecorderInstances = [];
 
   kioskAPI = (await import('../../src/services/api.js')).kioskAPI;
 
@@ -123,5 +130,27 @@ describe('Kiosk sayfası', () => {
     act(() => { recognitionInstances[0].onresult(finalResult('Operio ışıkları aç')); });
 
     expect(await screen.findByText(/Sizi dinleyemedim\..*Tekrar deneyin\./)).toBeInTheDocument();
+  });
+
+  it('MediaRecorder ondataavailable ile dolan son ses chunk\'ı base64\'e kodlanıp voiceCommand\'a "audio" olarak uçtan uca iletilir', async () => {
+    kioskAPI.status.mockResolvedValueOnce({ active: true, surgeryId: 's1' });
+    kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', say: 'Koter açıldı' });
+
+    renderKiosk();
+
+    await waitFor(() => expect(recognitionInstances.length).toBe(1));
+    await waitFor(() => expect(mediaRecorderInstances.length).toBe(1));
+
+    const recorder = mediaRecorderInstances[0];
+    // İlk parça tampon tarafından tutulur, ikincisi ÜZERİNE YAZAR (ring buffer, biriktirmez).
+    act(() => { recorder.ondataavailable({ data: new Blob(['ilk-parca'], { type: 'audio/webm' }) }); });
+    act(() => { recorder.ondataavailable({ data: new Blob(['son-parca'], { type: 'audio/webm' }) }); });
+
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
+
+    await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(1));
+    const [, , body] = kioskAPI.voiceCommand.mock.calls[0];
+    expect(typeof body.audio).toBe('string');
+    expect(atob(body.audio)).toBe('son-parca');
   });
 });

@@ -199,6 +199,66 @@ describe('useVoiceDeviceControl — uyandırma kelimesi ("operio") çıkarımı'
   });
 });
 
+describe('useVoiceDeviceControl — dönen (rolling) MediaRecorder ses tamponu', () => {
+  it('ondataavailable İKİ KEZ tetiklenirse tampon sadece SON chunk\'ı tutar (biriktirmez); bu chunk base64\'e kodlanıp voiceCommand\'a "audio" olarak gönderilir', async () => {
+    kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', say: 'Koter açıldı' });
+    const { result } = await renderIdleHook();
+    await waitFor(() => expect(mediaRecorderInstances.length).toBe(1));
+
+    const recorder = mediaRecorderInstances[0];
+    // İlk 3 saniyelik parça — tampon bunu tutar...
+    act(() => { recorder.ondataavailable({ data: new Blob(['ilk-parca'], { type: 'audio/webm' }) }); });
+    // ...ama ikinci parça gelince ÜZERİNE YAZMALI, biriktirmemeli (ring buffer, tek chunk).
+    act(() => { recorder.ondataavailable({ data: new Blob(['son-parca'], { type: 'audio/webm' }) }); });
+
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
+
+    await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(1));
+    const [, , body] = kioskAPI.voiceCommand.mock.calls[0];
+
+    expect(typeof body.audio).toBe('string');
+    expect(body.audio.length).toBeGreaterThan(0);
+    // blobToBase64 (FileReader.readAsDataURL + prefix temizleme) doğru çalışıyor mu —
+    // decode edilince SADECE en son chunk'ın içeriği çıkmalı, ilkiyle birleşmiş olmamalı.
+    expect(atob(body.audio)).toBe('son-parca');
+
+    await waitFor(() => expect(result.current.state).toBe('idle'));
+  });
+
+  it('ondataavailable boş (size:0) veri ile tetiklenirse tampon güncellenmez (önceki chunk korunur)', async () => {
+    kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', say: 'Koter açıldı' });
+    const { result } = await renderIdleHook();
+    await waitFor(() => expect(mediaRecorderInstances.length).toBe(1));
+
+    const recorder = mediaRecorderInstances[0];
+    act(() => { recorder.ondataavailable({ data: new Blob(['gercek-parca'], { type: 'audio/webm' }) }); });
+    // Boş bir chunk (bazı tarayıcılarda sessizlik için size:0 Blob gelebilir) tamponu silmemeli.
+    act(() => { recorder.ondataavailable({ data: new Blob([], { type: 'audio/webm' }) }); });
+
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
+
+    await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(1));
+    const [, , body] = kioskAPI.voiceCommand.mock.calls[0];
+    expect(atob(body.audio)).toBe('gercek-parca');
+
+    await waitFor(() => expect(result.current.state).toBe('idle'));
+  });
+
+  it('hiç ondataavailable tetiklenmemişse (tampon boş) voiceCommand audio:null ile çağrılır (çökmez)', async () => {
+    kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', say: 'Koter açıldı' });
+    const { result } = await renderIdleHook();
+    await waitFor(() => expect(mediaRecorderInstances.length).toBe(1));
+
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
+
+    await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(1));
+    const [, , body] = kioskAPI.voiceCommand.mock.calls[0];
+    expect(body.audio).toBeNull();
+
+    await waitFor(() => expect(result.current.state).toBe('idle'));
+  });
+});
+
 describe('useVoiceDeviceControl — yanıt tipleri', () => {
   it('TIMEOUT yanıtındaki iki cümle sırayla speechSynthesis ile okunur, state idle\'a döner', async () => {
     kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'TIMEOUT', say: ['Sizi dinleyemedim.', 'Tekrar deneyin.'] });
