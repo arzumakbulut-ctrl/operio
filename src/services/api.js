@@ -220,15 +220,15 @@ export const moduleAPI = {
 
 // ── KİOSK (sesli asistan — kiosk token ile, kişisel JWT'den AYRI) ──
 export const kioskAPI = {
-  voiceCommand: (roomId, kioskToken, { transcript, audio, confirmationPhrase }) =>
-    kioskRequest('POST', `/kiosk/rooms/${roomId}/voice-command`, kioskToken, { transcript, audio, confirmationPhrase }).then(r => r.data),
+  voiceCommand: (roomId, kioskToken, { transcript, audio, confirmationAnswer }) =>
+    kioskRequest('POST', `/kiosk/rooms/${roomId}/voice-command`, kioskToken, { transcript, audio, confirmationAnswer }).then(r => r.data),
   status: (roomId, kioskToken) =>
     kioskRequest('GET', `/kiosk/rooms/${roomId}/status`, kioskToken).then(r => r.data),
 };
 
 // ── SES PROFİLİ (konuşmacı doğrulama kaydı — kişisel JWT) ────
 export const voiceProfileAPI = {
-  enroll: (audioBase64) => post('/profile/voice-enrollment', { audio: audioBase64 }).then(r => r.data),
+  enroll: (audioBase64Array) => post('/profile/voice-enrollment', { audioSamples: audioBase64Array }).then(r => r.data),
   get:    ()             => get('/profile/voice-enrollment').then(r => r.data),
 };
 
