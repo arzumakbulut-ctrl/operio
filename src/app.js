@@ -76,9 +76,16 @@ app.use(cors({
 }));
 
 // ── GENEL RATE LIMIT ─────────────────────────────────────────
+// /api/kiosk/* bu IP-bazlı limitten MUAF tutulur: kiosk'lar /status'u 15sn'de bir
+// yoklar (tek boştaki kiosk = 60 istek/15dk). Hastanede birkaç kiosk aynı NAT
+// arkasındaysa, IP-bazlı 100/15dk limit dolup HEM kiosk trafiğini HEM de aynı IP'den
+// gelen sıradan klinisyen tarayıcı trafiğini 429'latırdı. Kiosk route'ları bunun yerine
+// kiosk.routes.js'teki, kiosk token'ının jti'sine göre anahtarlanan kendi limitini
+// kullanır (RATE_LIMIT.KIOSK_*). '/api/kiosk-admin' bu muafiyete GİRMEZ (sondaki '/').
 app.use(rateLimit({
   windowMs: RATE_LIMIT.API_WINDOW_MS,
   max:      RATE_LIMIT.API_MAX,
+  skip:     (req) => req.originalUrl.startsWith('/api/kiosk/'),
   standardHeaders: true,
   legacyHeaders:   false,
   message: {

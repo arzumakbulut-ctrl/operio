@@ -56,4 +56,55 @@ describe('kioskConfirmation.service', () => {
   it('hiç bekleyen onay olmayan bir roomId için null döner', () => {
     expect(resolvePendingConfirmation('room-never-existed', '1-2-3')).toBeNull();
   });
+
+  describe('rakam-tabanlı karşılaştırma (saklanan "4-7-2" formatı korunur)', () => {
+    // Math.random 0.4/0.7/0.2 → floor(x*10) = 4/7/2 → phrase "4-7-2".
+    function create472(roomId, payload) {
+      const spy = vi.spyOn(Math, 'random').mockReturnValueOnce(0.4).mockReturnValueOnce(0.7).mockReturnValueOnce(0.2);
+      const { phrase } = createPendingConfirmation(roomId, payload);
+      spy.mockRestore();
+      return phrase;
+    }
+
+    it('saklanan "4-7-2" ↔ gelen "4 7 2" eşleşir', () => {
+      const payload = { deviceId: 'dev-n1', action: 'turn_on' };
+      const phrase = create472('room-norm-space', payload);
+
+      expect(phrase).toBe('4-7-2'); // saklanan/okunan format değişmedi
+      expect(resolvePendingConfirmation('room-norm-space', '4 7 2')).toEqual(payload);
+    });
+
+    it('saklanan "4-7-2" ↔ gelen "472" eşleşir', () => {
+      const payload = { deviceId: 'dev-n2', action: 'turn_on' };
+      create472('room-norm-compact', payload);
+
+      expect(resolvePendingConfirmation('room-norm-compact', '472')).toEqual(payload);
+    });
+
+    it('gerçekten yanlış bir dizi hâlâ reddedilir (ve entry silinmez)', () => {
+      const payload = { deviceId: 'dev-n3', action: 'turn_on' };
+      create472('room-norm-wrong', payload);
+
+      expect(resolvePendingConfirmation('room-norm-wrong', '4 7 3')).toBeNull();
+      expect(resolvePendingConfirmation('room-norm-wrong', '47')).toBeNull();
+      expect(resolvePendingConfirmation('room-norm-wrong', '274')).toBeNull();
+      expect(resolvePendingConfirmation('room-norm-wrong', '4721')).toBeNull();
+      expect(resolvePendingConfirmation('room-norm-wrong', 'dört yedi iki')).toBeNull(); // rakam yok → boş → asla eşleşmez
+      expect(resolvePendingConfirmation('room-norm-wrong', '')).toBeNull();
+      // Yanlış denemeler entry'yi silmedi — doğru dizi hâlâ çalışır.
+      expect(resolvePendingConfirmation('room-norm-wrong', '4-7-2')).toEqual(payload);
+    });
+  });
+
+  describe('konuşmacı bağlama (initiatingUserId)', () => {
+    it('payload.initiatingUserId varsa, FARKLI bir konuşmacı doğru phrase ile bile çözemez (entry silinmez)', () => {
+      const payload = { deviceId: 'dev-s1', action: 'turn_on', initiatingUserId: 'nurse-a' };
+      const { phrase } = createPendingConfirmation('room-speaker', payload);
+
+      expect(resolvePendingConfirmation('room-speaker', phrase, 'nurse-b')).toBeNull();
+      expect(resolvePendingConfirmation('room-speaker', phrase)).toBeNull(); // onaylayan bilinmiyorsa da red
+      // Asıl başlatan kişi hâlâ onaylayabilir.
+      expect(resolvePendingConfirmation('room-speaker', phrase, 'nurse-a')).toEqual(payload);
+    });
+  });
 });

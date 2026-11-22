@@ -1,4 +1,7 @@
 const router = require('express').Router();
+const rateLimit = require('express-rate-limit');
+const { RATE_LIMIT } = require('../config/security');
+const { verifyKioskToken } = require('../utils/kioskJwt');
 const { kioskRoomAuth } = require('../middleware/kioskRoomAuth');
 const { kioskSpeakerAuth } = require('../middleware/kioskSpeakerAuth');
 const { validate } = require('../middleware/validate');
@@ -41,8 +44,11 @@ const DEVICE_GROUP_MAP = {
  * (Türkçe anahtar kelime) ve varsa transcript'teki bir sayıyı (params.value) verir.
  * Bu, DEVICE_COMMAND dalına özel ikinci-aşama bir ayrıştırmadır:
  *
- *   - masa (table) → HER ZAMAN 'arm_move' (masalar sesli komutla sadece kol/fiziksel-onay
- *     destekler — turn_on/off/set_power asla; bkz. Plan 1 tasarımı). value verilmemişse null.
+ *   - masa (table) → transcript "kapat"/"durdur" içeriyorsa 'turn_off' (hareket İÇERMEYEN,
+ *     device.service.decideCommand'ın requires_physical_confirm cihazlar için zaten izin
+ *     verdiği güvenli disarm/durdurma eylemi). Aksi HER durumda 'arm_move' (masalar sesli
+ *     komutla hareketi sadece kurabilir/arm — asıl hareket fiziksel konsoldan onaylanır;
+ *     turn_on/set_power asla; bkz. Plan 1 tasarımı). value verilmemişse null.
  *   - diğer gruplar → params.value bir SAYIYSA 'set_power'; değilse transcript "aç"
  *     içeriyorsa 'turn_on'; "kapat" içeriyorsa 'turn_off'; hiçbiri eşleşmezse null döner
  *     (çağıran taraf bunu "anlayamadım" fallback'i olarak ele alır — UNKNOWN'la aynı ruhta,
@@ -50,6 +56,9 @@ const DEVICE_GROUP_MAP = {
  */
 function deriveAction(deviceGroup, transcript, value) {
   if (deviceGroup === 'table') {
+    if (/kapat|durdur/i.test(transcript)) {
+      return { action: 'turn_off' };
+    }
     return { action: 'arm_move', value: value ?? null };
   }
   if (typeof value === 'number') {
@@ -113,6 +122,61 @@ const TIMEOUT_SENTENCES = [
 const UNKNOWN_RESPONSE = { type: 'UNKNOWN', say: 'Anlayamadım, tekrar söyler misiniz?' };
 
 /**
+ * kioskRateLimitKey — kiosk limitinin anahtarı. app.js'teki genel IP-bazlı limit
+ * /api/kiosk/*'u muaf tutar (aynı NAT arkasındaki kiosk'lar + klinisyenler birbirinin
+ * kotasını tüketmesin); burada bunun yerine kiosk token'ının jti'si (kioskRoomAuth'un
+ * kullandığı aynı verifyKioskToken ile, İMZASI DOĞRULANARAK çıkarılır — doğrulanmamış
+ * bir jti'yle anahtarlamak, istemcinin her istekte jti uydurup limiti atlatmasına izin
+ * verirdi) kullanılır. Token yok/geçersizse IP'ye düşülür (bu istekler zaten
+ * kioskRoomAuth'ta 401 alacak; yine de sınırsız kalmamaları için).
+ */
+function kioskRateLimitKey(req) {
+  const header = req.headers.authorization;
+  if (header && header.startsWith('Bearer ')) {
+    try {
+      const { jti } = verifyKioskToken(header.slice(7));
+      if (jti) return `kiosk-jti:${jti}`;
+    } catch {
+      // geçersiz token — IP'ye düş
+    }
+  }
+  return `kiosk-ip:${req.ip}`;
+}
+
+router.use(rateLimit({
+  windowMs: RATE_LIMIT.KIOSK_WINDOW_MS,
+  max:      RATE_LIMIT.KIOSK_MAX,
+  keyGenerator: kioskRateLimitKey,
+  standardHeaders: true,
+  legacyHeaders:   false,
+  message: {
+    success: false,
+    error: { code: 'TOO_MANY_REQUESTS', message: 'Çok fazla istek gönderildi, lütfen bekleyin' },
+  },
+}));
+
+/**
+ * Onaylanmış bir DEVICE_COMMAND'ın başarı mesajı. arm_move hareketi GERÇEKLEŞTİRMEZ —
+ * sadece kurar (ARMED); asıl hareket fiziksel konsoldan onaylanır (physicalConfirm).
+ * Bu yüzden arm_move için "uygulandı" demek yanıltıcı olur. Diğer tüm eylemler
+ * (turn_on/turn_off/set_power, masa için turn_off dahil) jenerik mesajı kullanır.
+ */
+function deviceCommandSuccessSay(action) {
+  if (action === 'arm_move') {
+    return 'Masa hazırlandı, konsoldan fiziksel onay bekleniyor.';
+  }
+  return 'Komut uygulandı.';
+}
+
+const CONFIRMATION_MISMATCH_BODY = {
+  success: false,
+  error: {
+    code: 'confirmation_mismatch',
+    message: 'Onay ifadesi hatalı veya süresi geçmiş, lütfen tekrar deneyin.',
+  },
+};
+
+/**
  * POST /api/kiosk/rooms/:roomId/voice-command
  *
  * Tek giriş noktası: tüm kiosk sesli komutları buradan geçer. kioskRoomAuth
@@ -122,12 +186,15 @@ const UNKNOWN_RESPONSE = { type: 'UNKNOWN', say: 'Anlayamadım, tekrar söyler m
  *   checklist'in bu iki maddesi ekipteki herkes tarafından okunabilir/teyit edilebilir,
  *   konuşmacı kimliği doğrulaması istemez. audit() 'voice:timeout_read' ile yazılır
  *   (userId: null — konuşmacı tanımlanmadı).
- * - DEVICE_COMMAND (Task 7): kioskSpeakerAuth'tan geçer (req.speaker doldurulur), sonra
- *   iki aşamalı sesli onay döngüsü çalışır — confirmationPhrase yoksa kioskConfirmation.
- *   service'te bir bekleyen onay (10sn TTL) oluşturulup phrase döner; confirmationPhrase
- *   varsa çözülür ve device.service.executeCommand() çağrılır (kendi audit()'ini kendi
- *   yazar). Bu ikinci çağrı da kioskRoomAuth'tan GEÇER — ameliyat artık IN_PROGRESS
- *   değilse bekleyen onaya hiç bakılmadan 409 döner (Review Focus #2).
+ * - ONAY ÇAĞRISI (body.confirmationPhrase dolu bir string): parseIntent HİÇ çalışmaz —
+ *   transcript (genelde sadece söylenen onay rakamları) yönlendirmeyi etkilemez.
+ *   kioskSpeakerAuth'tan geçilir, bekleyen onay (rakam-bazlı karşılaştırma + başlatan
+ *   konuşmacıyla eşleşme) çözülür ve device.service.executeCommand() çağrılır (kendi
+ *   audit()'ini kendi yazar). Bu ikinci çağrı da kioskRoomAuth'tan GEÇER — ameliyat artık
+ *   IN_PROGRESS değilse bekleyen onaya hiç bakılmadan 409 döner (Review Focus #2).
+ * - DEVICE_COMMAND (Task 7, ilk çağrı): kioskSpeakerAuth'tan geçer (req.speaker doldurulur),
+ *   eylem türetilir, hedef cihaz bulunur ve kioskConfirmation.service'te konuşmacıya bağlı
+ *   bir bekleyen onay (10sn TTL) oluşturulup phrase döner.
  * - SPOTIFY_PLAY (Task 9): DEVICE_COMMAND gibi kioskSpeakerAuth'tan manuel geçer, AMA
  *   DEVICE_COMMAND'ın aksine TEK adımda sonuçlanır — sesli onay döngüsüne (confirmationPhrase/
  *   createPendingConfirmation) HİÇ girmez. Sırasıyla: transcript'ten sorgu çıkarılır
@@ -153,6 +220,48 @@ router.post(
   validate(kioskVoiceCommandSchema),
   async (req, res) => {
     try {
+      const { confirmationPhrase } = req.body;
+
+      if (typeof confirmationPhrase === 'string' && confirmationPhrase.trim().length > 0) {
+        // İkinci (onay) çağrısı — parseIntent'ten ÖNCE ve ONDAN BAĞIMSIZ ele alınır.
+        // Gerçek istemci bu çağrıda transcript olarak kullanıcının söylediği onay
+        // rakamlarını gönderir ("4 7 2", "dört yedi iki" …); bu metin parseIntent'e
+        // girseydi UNKNOWN sınıflanır ve onay hiç çözülmezdi. confirmationPhrase varken
+        // transcript'in içeriği yönlendirmeyi HİÇ etkilemez; eylem/cihaz bilgisi zaten
+        // bekleyen payload'da saklıdır.
+        //
+        // kioskRoomAuth bu isteği de yeni baştan çalıştırdığı için (Review Focus #2)
+        // ameliyatın hâlâ IN_PROGRESS olduğu burada ayrıca kontrol edilmeden garanti.
+        // executeCommand userId/roleId istediğinden konuşmacı yine tanımlanır (aynı manuel
+        // kioskSpeakerAuth deseni — bkz. DEVICE_COMMAND dalındaki yorum).
+        let speakerAuthErr = null;
+        await kioskSpeakerAuth(req, res, (err) => { speakerAuthErr = err; });
+        if (speakerAuthErr) throw speakerAuthErr;
+        if (res.headersSent) return;
+
+        // Bekleyen onay yoksa / süresi geçmişse / rakamlar yanlışsa / onaylayan kişi komutu
+        // BAŞLATAN kişi değilse (initiatingUserId) null döner — hepsi aynı 400.
+        const payload = resolvePendingConfirmation(req.kiosk.roomId, confirmationPhrase, req.speaker.userId);
+        if (!payload) {
+          return res.status(400).json(CONFIRMATION_MISMATCH_BODY);
+        }
+
+        try {
+          const updated = await getDeviceService().executeCommand({
+            deviceId: payload.deviceId,
+            institutionId: req.kiosk.institutionId,
+            userId: req.speaker.userId,
+            roleId: req.speaker.roleId,
+            action: payload.action,
+            value: payload.value,
+            req,
+          });
+          return ok(res, { type: 'DEVICE_COMMAND', say: deviceCommandSuccessSay(payload.action), device: updated });
+        } catch (err) {
+          return handleCommandError(res, err);
+        }
+      }
+
       const intent = parseIntent(req.body.transcript);
 
       if (intent.type === 'TIMEOUT') {
@@ -184,41 +293,8 @@ router.post(
           });
         }
 
-        const { confirmationPhrase } = req.body;
-
-        if (confirmationPhrase) {
-          // İkinci (onay) çağrısı — kioskRoomAuth bu isteği de yeni baştan çalıştırdığı için
-          // (Review Focus #2) ameliyatın hâlâ IN_PROGRESS olduğu zaten burada ayrıca
-          // kontrol edilmeden garanti; bekleyen onay bulunamazsa/süresi geçmişse/yanlışsa
-          // resolvePendingConfirmation null döner.
-          const payload = resolvePendingConfirmation(req.kiosk.roomId, confirmationPhrase);
-          if (!payload) {
-            return res.status(400).json({
-              success: false,
-              error: {
-                code: 'confirmation_mismatch',
-                message: 'Onay ifadesi hatalı veya süresi geçmiş, lütfen tekrar deneyin.',
-              },
-            });
-          }
-
-          try {
-            const updated = await getDeviceService().executeCommand({
-              deviceId: payload.deviceId,
-              institutionId: req.kiosk.institutionId,
-              userId: req.speaker.userId,
-              roleId: req.speaker.roleId,
-              action: payload.action,
-              value: payload.value,
-              req,
-            });
-            return ok(res, { type: 'DEVICE_COMMAND', say: 'Komut uygulandı.', device: updated });
-          } catch (err) {
-            return handleCommandError(res, err);
-          }
-        }
-
-        // confirmationPhrase henüz yok — hedef cihazı bul ve bekleyen onay oluştur.
+        // (confirmationPhrase'li onay çağrısı buraya hiç ulaşmaz — handler'ın başında,
+        // parseIntent'ten önce ele alınır.) Hedef cihazı bul ve bekleyen onay oluştur.
         // listDevices deviceGroup filtresi ALMAZ (sadece kurum+oda) — dönen listeden
         // device_group'u eşleşen İLK cihaz seçilir (birden fazla eşleşirse ilki kazanır).
         const devices = await getDeviceService().listDevices({
@@ -230,16 +306,21 @@ router.post(
           return handleCommandError(res, new Error('device_not_found'));
         }
 
+        // initiatingUserId: bekleyen onay, komutu başlatan konuşmacıya bağlanır — onay
+        // çağrısında FARKLI bir ekip üyesi tanımlanırsa resolvePendingConfirmation reddeder.
         const { phrase } = createPendingConfirmation(req.kiosk.roomId, {
           deviceId: device.id,
           action: derived.action,
           value: derived.value,
+          initiatingUserId: req.speaker.userId,
         });
+        // Kiosk istemcisi sadece "Operio" uyandırma kelimesiyle başlayan ifadeleri işler —
+        // kullanıcıya onayda da uyandırma kelimesini söylemesi açıkça hatırlatılır.
         return ok(res, {
           type: 'DEVICE_COMMAND',
           status: 'pending_confirmation',
           phrase,
-          say: `Onaylamak için şu rakamları tekrar söyleyin: ${phrase}`,
+          say: `Onaylamak için 'Operio' deyip ardından şu rakamları tekrar söyleyin: ${phrase}`,
         });
       }
 

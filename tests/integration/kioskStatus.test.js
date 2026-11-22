@@ -59,4 +59,22 @@ describe('GET /api/kiosk/rooms/:roomId/status', () => {
     expect(res.body.success).toBe(false);
     expect(res.body.error.code).toBe('no_active_surgery');
   });
+
+  it('(c) /api/kiosk/* genel IP-bazlı 100/15dk limitten muaf — kendi jti-bazlı (300/15dk) limitini kullanır', async () => {
+    // Genel limiti (100) aşacak kadar yoklama: hiçbiri 429 almamalı.
+    const statuses = [];
+    for (let i = 0; i < 110; i++) {
+      const res = await request
+        .get('/api/kiosk/rooms/room-1/status')
+        .set('Authorization', authHeader());
+      statuses.push(res.status);
+    }
+    expect(statuses.every(s => s === 200)).toBe(true);
+
+    // Standart RateLimit-Limit başlığı genel limiti (100) değil, kiosk limitini (300) gösterir.
+    const last = await request
+      .get('/api/kiosk/rooms/room-1/status')
+      .set('Authorization', authHeader());
+    expect(last.headers['ratelimit-limit']).toBe('300');
+  });
 });

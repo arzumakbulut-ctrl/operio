@@ -21,6 +21,17 @@
  *   - Yanlış phrase, süresi GEÇMEMİŞ → entry SİLİNMEZ — kullanıcı aynı TTL
  *     penceresi içinde tekrar deneyebilsin (yanlış söyleyiş/ASR hatası tüm
  *     akışı sıfırlamamalı), null döner.
+ *   - Konuşmacı uyuşmazlığı (payload.initiatingUserId tanımlı ve onaylayan
+ *     konuşmacının userId'si bununla aynı DEĞİL) → yanlış phrase ile AYNI
+ *     muamele: entry SİLİNMEZ (komutu başlatan kişi TTL içinde hâlâ
+ *     onaylayabilsin), null döner. Böylece bir ekip üyesi başka birinin
+ *     başlattığı bekleyen komutu tamamlayamaz (audit log'un yanlış kişiyi
+ *     göstermesi de engellenir).
+ *
+ * Phrase karşılaştırması SADECE rakamlar üzerinden yapılır (normalizeDigits):
+ * saklanan/sesli okunan format "4-7-2" olarak KALIR, ama gelen ifade konuşma
+ * tanımadan "4 7 2", "472", "4-7-2." vb. hangi biçimde gelirse gelsin, iki
+ * taraftaki rakam-dışı tüm karakterler atılıp karşılaştırılır.
  */
 
 const PENDING = new Map();
@@ -36,7 +47,18 @@ function createPendingConfirmation(roomId, payload) {
   return { phrase };
 }
 
-function resolvePendingConfirmation(roomId, saidPhrase) {
+/** Rakam olmayan her karakteri atar ("4-7-2" / "4 7 2" / "472" → "472"). */
+function normalizeDigits(value) {
+  return typeof value === 'string' ? value.replace(/\D/g, '') : '';
+}
+
+/**
+ * @param {string} roomId
+ * @param {string} saidPhrase — onaylayanın söylediği rakamlar (biçim serbest, bkz. normalizeDigits)
+ * @param {string} [confirmingUserId] — onay çağrısında tanımlanan konuşmacı. Bekleyen
+ *   payload bir initiatingUserId taşıyorsa bununla birebir eşleşmek ZORUNDADIR.
+ */
+function resolvePendingConfirmation(roomId, saidPhrase, confirmingUserId) {
   const entry = PENDING.get(roomId);
   if (!entry) {
     return null;
@@ -47,7 +69,13 @@ function resolvePendingConfirmation(roomId, saidPhrase) {
     return null;
   }
 
-  if (saidPhrase !== entry.phrase) {
+  const said = normalizeDigits(saidPhrase);
+  if (said.length === 0 || said !== normalizeDigits(entry.phrase)) {
+    return null;
+  }
+
+  const initiator = entry.payload && entry.payload.initiatingUserId;
+  if (initiator !== undefined && initiator !== confirmingUserId) {
     return null;
   }
 
