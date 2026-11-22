@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useDataStore, useUIStore } from '../store';
 import Modal from '../components/ui/Modal';
+import { sterileSetsAPI } from '../services/api';
 
 const AKIS_ASAMALARI = [
   { key:'kirli_teslim',    lbl:'Kirli Teslim Alma',   icon:'📦', desc:'QR okutarak alet sayımı yap',          renk:'#DC2626' },
@@ -15,25 +16,62 @@ function SayimModal({ setId, onClose }) {
   const { showToast } = useUIStore();
   const s = sterilSetlerV2.find(x => x.id === setId);
   const akis = sterilAkis[setId] || { gercekSayim: {} };
-  const [sayimlar, setSayimlar] = useState(() =>
-    (s?.aletler || []).reduce((o, _, i) => { o[i] = akis.gercekSayim[i] ?? 1; return o; }, {})
-  );
+  // Task 1-4'ün hazırladığı 6 seed setinde backendSetId mevcut — bu dal onlar
+  // için SayimModal'ı gerçek /sterile-sets backend'ine bağlar. backendSetId
+  // olmayan tüm diğer setler (ve ileride eklenecek yeni mock setler) eski,
+  // tamamen yerel/mock davranışına AYNEN devam eder.
+  const hasBackend = Boolean(s?.backendSetId);
+
+  // Gerçek backend dalı: API'den gelen enstrüman listesi. null = henüz yüklenmedi.
+  const [realInstruments, setRealInstruments] = useState(null);
+  const [sayimlar, setSayimlar] = useState(() => {
+    if (hasBackend) return {};
+    return (s?.aletler || []).reduce((o, _, i) => { o[i] = akis.gercekSayim[i] ?? 1; return o; }, {});
+  });
   const [teslimEden, setTeslimEden] = useState('');
   const [salon, setSalon] = useState('');
   const [notlar, setNotlar] = useState('');
 
+  useEffect(() => {
+    if (!hasBackend) return;
+    let aktif = true;
+    sterileSetsAPI.get(s.backendSetId).then((data) => {
+      if (!aktif) return;
+      const instruments = data?.instruments || [];
+      setRealInstruments(instruments);
+      setSayimlar(instruments.reduce((o, ins) => { o[ins.id] = ins.expected_count; return o; }, {}));
+    });
+    return () => { aktif = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasBackend, s?.backendSetId]);
+
   if (!s) return null;
 
-  function degistir(idx, delta) {
-    setSayimlar(p => ({ ...p, [idx]: Math.max(0, (p[idx] ?? 1) + delta) }));
+  function degistir(key, delta, varsayilan = 1) {
+    setSayimlar(p => ({ ...p, [key]: Math.max(0, (p[key] ?? varsayilan) + delta) }));
   }
 
   function kaydet() {
     if (!teslimEden.trim()) { showToast('Teslim eden personeli girin'); return; }
     if (!salon) { showToast('Salon seçin'); return; }
-    const tamMi = s.aletler.every((_, i) => (sayimlar[i] ?? 1) >= 1);
     const now = new Date();
     const saat = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+
+    let tamMi;
+    if (hasBackend) {
+      const instruments = realInstruments || [];
+      tamMi = instruments.every(ins => (sayimlar[ins.id] ?? 0) >= ins.expected_count);
+      sterileSetsAPI.addTracking(s.backendSetId, {
+        stage: 'teslim_alindi',
+        operator: teslimEden,
+        notes: notlar,
+        counts: instruments.map(ins => ({ instrumentId: ins.id, count: sayimlar[ins.id] })),
+      });
+    } else {
+      tamMi = s.aletler.every((_, i) => (sayimlar[i] ?? 1) >= 1);
+    }
+
+    // Görsel akış göstergesini ilerleten mock-store çağrıları — her iki dalda da AYNEN çalışır.
     updateSterilAkis(setId, {
       gercekSayim: sayimlar,
       zamanlar: { ...(akis.zamanlar || {}), kirli_teslim: saat + ' — Teslim alındı · ' + teslimEden },
@@ -43,8 +81,13 @@ function SayimModal({ setId, onClose }) {
     onClose();
   }
 
-  const tamSayisi = s.aletler.filter((_, i) => (sayimlar[i] ?? 1) === 1).length;
-  const eksiVar   = s.aletler.some((_, i) => (sayimlar[i] ?? 1) < 1);
+  const toplamAdet = hasBackend ? (realInstruments || []).length : s.aletler.length;
+  const tamSayisi = hasBackend
+    ? (realInstruments || []).filter(ins => (sayimlar[ins.id] ?? 0) === ins.expected_count).length
+    : s.aletler.filter((_, i) => (sayimlar[i] ?? 1) === 1).length;
+  const eksiVar = hasBackend
+    ? (realInstruments || []).some(ins => (sayimlar[ins.id] ?? 0) < ins.expected_count)
+    : s.aletler.some((_, i) => (sayimlar[i] ?? 1) < 1);
 
   return (
     <Modal title={`Alet Sayım Formu — ${s.name}`} onClose={onClose} width={560}>
@@ -59,7 +102,7 @@ function SayimModal({ setId, onClose }) {
         </div>
         <div style={{ flex:1 }}>
           <div style={{ fontSize:13, fontWeight:700, color:'var(--slate)' }}>{s.name}</div>
-          <div style={{ fontSize:11, color:'var(--slate-light)', marginTop:2 }}>{s.doktor} · Raf: {s.raf} · {s.aletler.length} alet</div>
+          <div style={{ fontSize:11, color:'var(--slate-light)', marginTop:2 }}>{s.doktor} · Raf: {s.raf} · {toplamAdet} alet</div>
         </div>
         <span className="tag t-red" style={{ fontSize:9 }}>Kirli Teslim</span>
       </div>
@@ -84,7 +127,28 @@ function SayimModal({ setId, onClose }) {
             <span key={h} style={{ fontSize:9, fontWeight:700, color:'var(--slate-light)', textTransform:'uppercase', letterSpacing:'0.5px', textAlign:'center' }}>{h}</span>
           ))}
         </div>
-        {s.aletler.map((a, i) => {
+        {hasBackend ? (
+          realInstruments === null ? (
+            <div style={{ padding:'16px 12px', textAlign:'center', fontSize:12, color:'var(--slate-light)' }}>Aletler yükleniyor…</div>
+          ) : realInstruments.map((ins) => {
+            const say = sayimlar[ins.id] ?? ins.expected_count;
+            const ok = say === ins.expected_count; const fazla = say > ins.expected_count;
+            return (
+              <div key={ins.id} style={{ display:'grid', gridTemplateColumns:'1fr 72px 108px 52px', alignItems:'center', padding:'9px 12px', borderBottom:'1px solid var(--border)' }}>
+                <div style={{ fontSize:12, fontWeight:500, color:'var(--slate)' }}>{ins.name}</div>
+                <div style={{ textAlign:'center', fontSize:12, fontWeight:600, color:'var(--slate-mid)' }}>{ins.expected_count}</div>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+                  <div className="cnt-btn" onClick={() => degistir(ins.id, -1, ins.expected_count)}>−</div>
+                  <div className={`cnt-val ${ok?'cnt-ok':fazla?'cnt-fazla':'cnt-miss'}`} style={{ width:30, fontSize:13, fontWeight:800 }}>{say}</div>
+                  <div className="cnt-btn" onClick={() => degistir(ins.id, 1, ins.expected_count)}>+</div>
+                </div>
+                <div style={{ textAlign:'center', fontSize:16 }}>
+                  {ok ? <span style={{ color:'var(--success)' }}>✓</span> : fazla ? <span style={{ color:'var(--warning)', fontSize:13 }}>↑</span> : <span style={{ color:'var(--danger)' }}>⚠</span>}
+                </div>
+              </div>
+            );
+          })
+        ) : s.aletler.map((a, i) => {
           const say = sayimlar[i] ?? 1;
           const ok = say === 1; const fazla = say > 1;
           return (
@@ -103,8 +167,8 @@ function SayimModal({ setId, onClose }) {
           );
         })}
         <div style={{ padding:'8px 12px', display:'flex', justifyContent:'space-between', background:'var(--surface)' }}>
-          <span style={{ fontSize:11, color:'var(--slate-mid)' }}>Toplam: <strong style={{ color:'var(--slate)' }}>{s.aletler.length} alet</strong></span>
-          <span style={{ fontSize:11, fontWeight:700, color: eksiVar ? 'var(--danger)' : 'var(--success)' }}>{tamSayisi}/{s.aletler.length} tam</span>
+          <span style={{ fontSize:11, color:'var(--slate-mid)' }}>Toplam: <strong style={{ color:'var(--slate)' }}>{toplamAdet} alet</strong></span>
+          <span style={{ fontSize:11, fontWeight:700, color: eksiVar ? 'var(--danger)' : 'var(--success)' }}>{tamSayisi}/{toplamAdet} tam</span>
         </div>
       </div>
 
