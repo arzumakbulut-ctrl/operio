@@ -284,8 +284,11 @@ function SayimModal({ setId, onClose }) {
         showToast('Sayım kaydedilemedi' + (e?.message ? ': ' + e.message : '') + ' — lütfen tekrar deneyin');
         return;
       }
-      if (!mountedRef.current) return;
-      setKaydediliyor(false);
+      // Yalnızca bu bileşenin React state'i mount'a bağlı. Aşağıdaki store
+      // senkronu/toast, kullanıcı kayıt sürerken "İptal"e bassa bile
+      // (bileşen unmount olmuş olsa bile) backend'in onayladığı kayıt için
+      // MUTLAKA çalışmalı — aksi halde onaylanmış teslim sessizce kaybolur.
+      if (mountedRef.current) setKaydediliyor(false);
     } else {
       tamMi = s.aletler.every((_, i) => (sayimlar[i] ?? 1) >= 1);
     }

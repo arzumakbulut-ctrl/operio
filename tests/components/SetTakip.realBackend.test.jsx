@@ -241,4 +241,36 @@ describe('SetTakip — SayimModal gerçek backend entegrasyonu', () => {
     fireEvent.click(kaydediliyorButonu);
     expect(sterileSetsAPI.addTracking).toHaveBeenCalledTimes(1);
   });
+
+  it('kayıt sürerken "İptal" ile modal kapatılır ve addTracking SONRA başarılı dönerse akış yine de ilerler ve başarı toast\'ı gösterilir', async () => {
+    const { sterileSetsAPI } = await import('../../src/services/api.js');
+    sterileSetsAPI.get.mockResolvedValueOnce({
+      id: '10000000-0000-0000-0000-000000000001',
+      instruments: [{ id: 'i1', name: 'Trokar 10mm', expected_count: 1, current_count: 1 }],
+    });
+    let resolveTracking;
+    sterileSetsAPI.addTracking.mockImplementationOnce(() => new Promise((r) => { resolveTracking = r; }));
+    expect(useDataStore.getState().sterilAkis[1].asama).toBe('kirli_teslim');
+
+    render(<SetTakip />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Teslim Al' }));
+    await screen.findByRole('button', { name: 'Trokar 10mm arttır' });
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'Salon 1' } });
+    fireEvent.change(screen.getByPlaceholderText('Dr. / Hemşire adı'), { target: { value: 'Hem. Test' } });
+    fireEvent.click(screen.getByRole('button', { name: /Sayımı Onayla/i }));
+    await screen.findByRole('button', { name: /Kaydediliyor/i });
+
+    // Kayıt sürerken kullanıcı modalı kapatır — SayimModal unmount olur.
+    fireEvent.click(screen.getByRole('button', { name: 'İptal' }));
+    await waitFor(() =>
+      expect(screen.queryByText('Alet Sayım Formu — Laparoskopi Seti A')).not.toBeInTheDocument()
+    );
+    expect(useDataStore.getState().sterilAkis[1].asama).toBe('kirli_teslim');
+
+    // Backend kaydı onaylar — store senkronu ve toast yine de çalışmalı.
+    resolveTracking({ id: 'log1' });
+    await waitFor(() => expect(useDataStore.getState().sterilAkis[1].asama).toBe('yikamada'));
+    expect(useUIStore.getState().toastMsg).toBe('Laparoskopi Seti A kirli teslim alındı ✓');
+  });
 });
