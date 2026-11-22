@@ -4,6 +4,7 @@ import { useSocket } from './hooks/useSocket';
 import { useAuthStore, useDataStore } from './store';
 import AuthScreen from './components/auth/AuthScreen';
 import AppLayout from './components/layout/AppLayout';
+import Kiosk from './pages/Kiosk';
 import Toast from './components/ui/Toast';
 import ConnectionStatus from './components/ui/ConnectionStatus';
 
@@ -23,6 +24,8 @@ import EgitimTakvim      from './pages/EgitimTakvim';
 import EgitimKutuphane   from './pages/EgitimKutuphane';
 import Dokumanlar        from './pages/Dokumanlar';
 import Envanter          from './pages/Envanter';
+import CihazKontrol      from './pages/CihazKontrol';
+import SesliKontrolAyarlari from './pages/SesliKontrolAyarlari';
 import MisafirHekimYonetim from './pages/MisafirHekimYonetim';
 import Roller            from './pages/Roller';
 import SterilDepo        from './pages/SterilDepo';
@@ -154,6 +157,9 @@ export default function App() {
         {/* Auth */}
         <Route path="/giris" element={isLoggedIn ? <Navigate to="/dashboard" replace /> : <AuthScreen />} />
 
+        {/* Kiosk — odaya sabit ekran, kişisel giriş guard'ından MUAF (kendi kiosk-token mantığıyla çalışır) */}
+        <Route path="/kiosk/:roomId" element={<Kiosk />} />
+
         {/* ── GENEL ── */}
         <Route path="/dashboard"   element={<ProtectedLayout><Dashboard /></ProtectedLayout>} />
         <Route path="/ameliyatlar" element={<ProtectedLayout><Ameliyatlar /></ProtectedLayout>} />
@@ -212,6 +218,8 @@ export default function App() {
         <Route path="/tekli"       element={<ProtectedLayout><TekliAletler /></ProtectedLayout>} />
         <Route path="/steril-gecmis" element={<ProtectedLayout><SterilGecmis /></ProtectedLayout>} />
         <Route path="/steril-personel" element={<ProtectedLayout><SterilPersonel /></ProtectedLayout>} />
+        <Route path="/cihaz-kontrol" element={<ProtectedLayout><CihazKontrol /></ProtectedLayout>} />
+        <Route path="/sesli-kontrol-ayarlari" element={<ProtectedLayout><SesliKontrolAyarlari /></ProtectedLayout>} />
 
         {/* ── DOKTOR ── */}
         <Route path="/talep"       element={<ProtectedLayout><AmeliyatTalebi /></ProtectedLayout>} />
