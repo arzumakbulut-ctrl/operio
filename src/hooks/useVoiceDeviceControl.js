@@ -23,6 +23,19 @@ import { kioskAPI } from '../services/api.js';
 const WAKE_WORD = 'operio';
 const NO_SURGERY_POLL_MS = 15000;
 const AUDIO_TIMESLICE_MS = 3000;
+// Backend'deki pending-confirmation kaydı ~20 saniye sonra kendiliğinden süresi
+// doluyor (bkz. spec Karar 12). Hook bunu kendi tarafında da uygulamalı — aksi
+// halde kimse "evet"/"hayır" demezse state sonsuza dek awaiting_confirmation'da
+// kalır ve bir süre sonra gelen TAMAMEN alakasız bir komut, backend tarafından
+// süresi geçmiş/eşleşmeyen bir onay cevabı olarak değerlendirilip reddedilir.
+const CONFIRMATION_TIMEOUT_MS = 20000;
+// flushCurrentRecording() normalde recorder.stop()'un onstop'u (mock'larda
+// senkron, gerçek tarayıcıda bir sonraki tick'te) tetiklemesiyle hemen çözülür.
+// Ama bunun GARANTİ olmadığı durumlar var (bkz. Review Focus #1'in "sonsuza dek
+// beklemeyelim" uyarısı: ör. nadir bir tarayıcı/cihaz tuhaflığı 'stop' olayını
+// hiç fırlatmazsa) — bu kısa güvenlik ağı, handleWakeWordUtterance'ın komut
+// gönderimini süresiz olarak engellememesini sağlar.
+const FLUSH_SAFETY_TIMEOUT_MS = 500;
 const GENERIC_ERROR_MESSAGE = 'Bir hata oluştu, lütfen tekrar deneyin.';
 const SURGERY_ENDED_MESSAGE = 'Bu ameliyat sona erdi, sesli kontrol artık kapalı.';
 
@@ -73,13 +86,84 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
   // biriktirilmez. Plan bunun gerçek ifade sınırlarıyla hizalanmadığını
   // (yaklaşık/approximate) açıkça kabul ediyor; bu bilinçli bir basitleştirme.
   const latestAudioChunkRef = useRef(null);
+  // handleWakeWordUtterance, bir "operio" ifadesi algılandığında O ANDA kayıtta
+  // olan döngüyü flush etmek (stop edip onstop'un blob'u üretmesini beklemek)
+  // için bu ref'e kendi resolve fonksiyonunu koyar; recordCycle'ın onstop'u
+  // (normal döngü-sonu akışına ek olarak) bunu çağırır. bkz. flushCurrentRecording.
+  const pendingFlushResolveRef = useRef(null);
+  // awaiting_confirmation'a girildiğinde başlatılan, backend'in ~20s'lik
+  // pending-confirmation TTL'ini istemci tarafında yansıtan zamanlayıcı.
+  const confirmationTimeoutRef = useRef(null);
+
+  function clearConfirmationTimeout() {
+    if (confirmationTimeoutRef.current) {
+      clearTimeout(confirmationTimeoutRef.current);
+      confirmationTimeoutRef.current = null;
+    }
+  }
+
+  function startConfirmationTimeout() {
+    clearConfirmationTimeout();
+    confirmationTimeoutRef.current = setTimeout(() => {
+      confirmationTimeoutRef.current = null;
+      // Hâlâ awaiting_confirmation'daysak (yani bu süre içinde evet/hayır/mismatch
+      // gibi hiçbir şey state'i değiştirmediyse) sessizce idle'a dön — aksi halde
+      // kullanıcının bir süre sonra söylediği TAMAMEN alakasız bir komut, backend
+      // tarafında süresi geçmiş bir onay cevabı olarak reddedilip kaybolurdu.
+      if (phaseRef.current === 'awaiting_confirmation') setPhase('idle');
+    }, CONFIRMATION_TIMEOUT_MS);
+  }
+
+  function resolvePendingFlush() {
+    if (pendingFlushResolveRef.current) {
+      const resolve = pendingFlushResolveRef.current;
+      pendingFlushResolveRef.current = null;
+      resolve();
+    }
+  }
+
+  // Şu an kayıtta olan döngüyü (varsa) hemen durdurup onstop'un blob'u üretmesini
+  // bekler — handleWakeWordUtterance, sendVoiceCommand'ı çağırmadan ÖNCE bunu
+  // await eder, böylece gönderilen ses "bir önceki tamamlanmış 3s'lik parça" değil,
+  // "wake-word'ün algılandığı ana kadar kaydedilmiş" ses olur (bkz. Review Focus #1).
+  // Kayıtta aktif bir döngü yoksa (mikrofon izni yok/MediaRecorder desteklenmiyor)
+  // hemen çözülür — sonsuza dek beklemez.
+  function flushCurrentRecording() {
+    const current = mediaRecorderRef.current;
+    if (!current || current.recorder.state !== 'recording') return Promise.resolve();
+    return new Promise((resolve) => {
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        pendingFlushResolveRef.current = null;
+        resolve();
+      };
+      pendingFlushResolveRef.current = settle;
+      // Güvenlik ağı: onstop çağrılmazsa (ör. .stop() 'stop' olayını hiç
+      // tetiklemezse) bu await sonsuza dek asılı kalmasın — kısa bir süre
+      // sonra mevcut (muhtemelen bayat) ref değeriyle devam et.
+      setTimeout(settle, FLUSH_SAFETY_TIMEOUT_MS);
+      try {
+        current.recorder.stop();
+      } catch {
+        // stop() çağrısı başarısız oldu (ör. zaten durdurulmuş) — hemen çöz.
+        settle();
+      }
+    });
+  }
 
   function setPhase(next) {
     phaseRef.current = next;
+    // awaiting_confirmation'dan başka HERHANGİ bir faza geçişte TTL zamanlayıcısını
+    // iptal et — onay başka bir yoldan (cevap/hata/mismatch) zaten çözüldü, daha
+    // sonra geç kalmış bir zamanlayıcı yanlışlıkla state'i tekrar etkilememeli.
+    if (next !== 'awaiting_confirmation') clearConfirmationTimeout();
     setState(next);
   }
 
   function stopPipeline() {
+    clearConfirmationTimeout();
     if (recognitionRef.current) {
       try { recognitionRef.current.stop(); } catch { /* zaten durmuş olabilir */ }
       recognitionRef.current = null;
@@ -136,20 +220,42 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
   // timeslice yerine kendi kendini yeniden başlatan bir döngü.
   function recordCycle(stream) {
     if (unmountedRef.current || phaseRef.current === 'no_surgery') return;
-    const chunks = [];
-    const recorder = new window.MediaRecorder(stream);
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) chunks.push(e.data);
-    };
-    recorder.onstop = () => {
-      if (chunks.length > 0) latestAudioChunkRef.current = new Blob(chunks, { type: 'audio/webm' });
-      recordCycle(stream);
-    };
-    recorder.start();
-    mediaRecorderRef.current = { recorder, stream };
-    setTimeout(() => {
-      try { recorder.stop(); } catch { /* zaten durmuş olabilir */ }
-    }, AUDIO_TIMESLICE_MS);
+    try {
+      const chunks = [];
+      const recorder = new window.MediaRecorder(stream);
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunks.push(e.data);
+      };
+      recorder.onstop = () => {
+        // Stale-cycle guard: hook'un efekti roomId/kioskToken değişimiyle yeniden
+        // çalıştıysa (cleanup -> yeniden kurulum), bu döngünün stream'i artık
+        // mediaRecorderRef'te tutulan AKTİF stream olmayabilir — gerçek
+        // tarayıcıda stop() olayı asenkron geldiği için yeni efekt zaten
+        // unmountedRef'i resetlemiş olabilir. Böyle bir durumda ÖLÜ stream
+        // üzerinde döngüyü yeniden başlatma.
+        if (mediaRecorderRef.current?.stream !== stream) {
+          resolvePendingFlush();
+          return;
+        }
+        if (chunks.length > 0) latestAudioChunkRef.current = new Blob(chunks, { type: 'audio/webm' });
+        resolvePendingFlush();
+        recordCycle(stream);
+      };
+      recorder.start();
+      mediaRecorderRef.current = { recorder, stream };
+      setTimeout(() => {
+        try { recorder.stop(); } catch { /* zaten durmuş olabilir */ }
+      }, AUDIO_TIMESLICE_MS);
+    } catch {
+      // MediaRecorder oluşturma veya start() hata verdi (ör. mikrofon track'i
+      // bitti/cihaz kaybedildi, ameliyat ortasında olabilir) — döngüyü burada
+      // SESSİZCE durdur, tekrar recordCycle çağırıp aynı hatayı sıkı bir
+      // döngüde tekrarlama. latestAudioChunkRef'i temizle: bir sonraki komut
+      // artık YENİ bir chunk yakalanamadığı için bayat (potansiyel olarak
+      // başka birine ait) sesi yeniden göndermek yerine audio:null göndermeli.
+      latestAudioChunkRef.current = null;
+      resolvePendingFlush();
+    }
   }
 
   async function startAudioCapture() {
@@ -178,9 +284,16 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
 
   async function sendVoiceCommand(payload) {
     setPhase('executing');
+    // Tek-seferlik ("consumed-once") okuma: ref'i HEMEN temizle ki bu döngü
+    // başarısız olur/hiç yeni chunk yakalanmazsa bir SONRAKİ komut bu (muhtemelen
+    // bayat, başka birine ait) sesi sessizce yeniden göndermesin — onun yerine
+    // audio:null göndersin (backend bunu zaten güvenli varsayılan "tanınamadı"
+    // olarak ele alıyor).
+    const chunkToSend = latestAudioChunkRef.current;
+    latestAudioChunkRef.current = null;
     let audioBase64 = null;
-    if (latestAudioChunkRef.current) {
-      try { audioBase64 = await blobToBase64(latestAudioChunkRef.current); } catch { audioBase64 = null; }
+    if (chunkToSend) {
+      try { audioBase64 = await blobToBase64(chunkToSend); } catch { audioBase64 = null; }
     }
     try {
       const response = await kioskAPI.voiceCommand(roomId, kioskToken, { ...payload, audio: audioBase64 });
@@ -191,7 +304,12 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
   }
 
   function handleResponse(response) {
-    setLastResponse(response);
+    // say:null + pending_confirmation → backend hâlâ belirsiz (ambiguous) ASR
+    // sonuçları nedeniyle bekliyor; bu durumda lastResponse'u EZME — ekranda
+    // halen görünen asıl onay sorusu (say'li önceki pending_confirmation
+    // yanıtı) kaybolmasın, kiosk sessizce beklerken kullanıcı soruyu okuyabilsin.
+    const isAmbiguousPendingConfirmation = response?.status === 'pending_confirmation' && !response.say;
+    if (!isAmbiguousPendingConfirmation) setLastResponse(response);
 
     if (response?.type === 'TIMEOUT' && Array.isArray(response.say)) {
       // İki cümle sırayla okunur. Tarayıcının speechSynthesis kuyruğu
@@ -207,6 +325,11 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
       // kalınır. speak() zaten falsy metinde no-op olduğu için ek bir dallanma gerekmez.
       setPhase('awaiting_confirmation');
       speak(response.say);
+      // İstemci tarafı TTL: backend'in ~20s'lik pending-confirmation penceresini
+      // yansıtır (bkz. CONFIRMATION_TIMEOUT_MS tanımı). setPhase('awaiting_confirmation')
+      // zaten varsa önceki zamanlayıcıyı silmiyor (next==='awaiting_confirmation' olduğu
+      // için) — bu yüzden burada açıkça (yeniden) başlatıyoruz.
+      startConfirmationTimeout();
       return;
     }
 
@@ -246,14 +369,29 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
     setPhase('idle');
   }
 
-  function handleWakeWordUtterance(commandText) {
+  async function handleWakeWordUtterance(commandText) {
     // 'no_surgery': pipeline durdurulmuş olmalı ama olur da bir onresult
     // sıraya girmiş olursa yoksay. 'executing': aynı anda ikinci bir isteği
     // tetiklememek için (plan bunu tanımlamıyor, ek bir güvenlik önlemi).
     if (phaseRef.current === 'no_surgery' || phaseRef.current === 'executing') return;
 
+    // Review Focus #1: SpeechRecognition'ın final transcript'i, konuşma
+    // bittikten ~0.5-1.5s SONRA gelir — bu yüzden wake-word algılandığı anda
+    // latestAudioChunkRef'teki değer hâlâ BİR ÖNCEKİ (tamamlanmış) 3s'lik
+    // parça olur, asıl konuşma ise o anda hâlâ kayıtta olan döngüde birikiyor
+    // olur. Göndermeden ÖNCE o döngüyü flush edip (stop + onstop'un blob'u
+    // üretmesini bekleyip) tamamlamak, gönderilen sesi gerçek ifadeye çok
+    // daha yakın hale getirir (mükemmel hizalama değil, ama sınırlı/kayda
+    // değer bir iyileştirme).
+    await flushCurrentRecording();
+
+    // Flush beklenirken (ör. MediaRecorder.stop()'un gerçek tarayıcıdaki
+    // asenkron onstop'u) faz değişmiş olabilir — aynı korumaları tekrar kontrol et.
+    if (phaseRef.current === 'no_surgery' || phaseRef.current === 'executing') return;
+
     // Ses tamponu (latestAudioChunkRef) sendVoiceCommand() içinde okunuyor —
-    // bu, o anki en son 3 saniyelik parçayı "bu ifadenin sesi" olarak alır.
+    // flush sayesinde bu artık o anki en son (ve wake-word anına kadar
+    // kaydedilmiş) parçayı "bu ifadenin sesi" olarak alır.
     if (phaseRef.current === 'awaiting_confirmation') {
       sendVoiceCommand({ transcript: commandText, confirmationAnswer: commandText });
     } else {

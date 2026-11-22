@@ -46,6 +46,15 @@ class MockMediaRecorder {
   }
   start(timeslice) { this.state = 'recording'; this.startedWithTimeslice = timeslice; }
   stop() {
+    // Gerçek MediaRecorder: state zaten 'inactive' iken stop() çağrılırsa
+    // InvalidStateError FIRLATIR (onstop'u İKİNCİ kez TETİKLEMEZ) — bu, Finding 2/5
+    // fix'lerinin dayandığı try/catch'li çağrı yerlerinin (recordCycle'ın periyodik
+    // setTimeout'u, flushCurrentRecording) doğru test edilebilmesi için önemli:
+    // bir döngü zaten manuel flush ile bitirildiyse, daha sonra ateşlenen "doğal"
+    // 3s zaman aşımı onstop'u TEKRAR çağırmamalı.
+    if (this.state !== 'recording') {
+      throw new DOMException('The MediaRecorder is inactive.', 'InvalidStateError');
+    }
     this.state = 'inactive';
     this.stopped += 1;
     // Gerçek MediaRecorder.stop() asenkron olarak 'stop' olayını tetikler;
@@ -370,6 +379,274 @@ describe('ses yakalama — döngü-başı taze MediaRecorder', () => {
   });
 });
 
+describe('useVoiceDeviceControl — wake-word flush (final review Finding 1)', () => {
+  it('wake-word tetiklendiğinde AKTİF kayıttaki döngü flush edilir — gönderilen ses, bir önceki TAMAMLANMIŞ (bayat) döngünün değil, o anki konuşmanın verisidir', async () => {
+    kioskAPI.status.mockResolvedValueOnce({ active: true, surgeryId: 'surg1' });
+    kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', say: 'Koter açıldı' });
+
+    const { unmount } = renderStartedHook();
+    await waitFor(() => expect(mediaRecorderInstances.length).toBe(1));
+    await waitFor(() => expect(recognitionInstances.length).toBe(1));
+
+    // 1. döngü "eski-veri" ile tamamlanır (stop() -> onstop senkron tetiklenir,
+    // yeni döngü #2 hemen başlar — bu, gerçek kodun kendi kendini yeniden
+    // başlatan rolling-recorder davranışı).
+    mediaRecorderInstances[0].ondataavailable({ data: new Blob(['eski-veri'], { type: 'audio/webm' }) });
+    mediaRecorderInstances[0].stop();
+    await waitFor(() => expect(mediaRecorderInstances.length).toBe(2));
+
+    // 2. döngü (ŞU AN kayıtta) wake-word'ün gerçek konuşmasını alır ama kendi
+    // 3 saniyelik döngüsü HENÜZ bitmedi (hiç stop() edilmedi) — SpeechRecognition'ın
+    // final transcript'i konuşma bittikten sonra geldiği için bu normal.
+    mediaRecorderInstances[1].ondataavailable({ data: new Blob(['wake-word-sesi'], { type: 'audio/webm' }) });
+    expect(mediaRecorderInstances[1].state).toBe('recording');
+
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
+
+    // Flush: handleWakeWordUtterance 2. döngüyü (hâlâ kayıtta olanı) durdurmuş
+    // olmalı — bu da kendi onstop'u üzerinden 3. döngüyü başlatmış olmalı.
+    await waitFor(() => expect(mediaRecorderInstances[1].stopped).toBe(1));
+    await waitFor(() => expect(mediaRecorderInstances.length).toBe(3));
+
+    await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(1));
+    const [, , body] = kioskAPI.voiceCommand.mock.calls[0];
+    // Bayat ("eski-veri") DEĞİL, flush edilen 2. döngünün ("wake-word-sesi") verisi gönderilmeli.
+    expect(atob(body.audio)).toBe('wake-word-sesi');
+
+    // Testler arası sızıntı olmasın: 3. döngünün gerçek (fake olmayan) 3s'lik
+    // setTimeout'u hâlâ bekliyor olurdu — unmount ile pipeline'ı hemen durdur.
+    unmount();
+  });
+
+  it('wake-word anında kayıtta hiçbir döngü yoksa (mikrofon izni yok) flush sonsuza dek beklemez, audio:null ile devam eder', async () => {
+    navigator.mediaDevices.getUserMedia.mockRejectedValueOnce(new Error('NotAllowedError'));
+    kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', say: 'Koter açıldı' });
+    const { result, unmount } = await renderIdleHook();
+
+    expect(mediaRecorderInstances.length).toBe(0);
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
+
+    // Flush'ın "aktif döngü yok -> hemen çözül" dalı tetiklenmeli; aksi halde
+    // bu test asla çözülmeyen bir promise'de asılı kalır ve timeout ile FAIL eder.
+    await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(1));
+    expect(kioskAPI.voiceCommand.mock.calls[0][2].audio).toBeNull();
+    await waitFor(() => expect(result.current.state).toBe('idle'));
+    unmount();
+  });
+});
+
+describe('useVoiceDeviceControl — bayat ses korumaları (final review Finding 2)', () => {
+  it('sendVoiceCommand sonrası latestAudioChunkRef temizlenir — bir SONRAKİ komutta yeni chunk yoksa audio:null gönderilir (bayat ses yeniden gönderilmez)', async () => {
+    kioskAPI.status.mockResolvedValueOnce({ active: true, surgeryId: 'surg1' });
+    kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', say: 'Koter açıldı' });
+
+    const { unmount } = renderStartedHook();
+    await waitFor(() => expect(mediaRecorderInstances.length).toBe(1));
+    await waitFor(() => expect(recognitionInstances.length).toBe(1));
+
+    mediaRecorderInstances[0].ondataavailable({ data: new Blob(['eski-ses'], { type: 'audio/webm' }) });
+
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
+    await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(1));
+    expect(atob(kioskAPI.voiceCommand.mock.calls[0][2].audio)).toBe('eski-ses');
+    await waitFor(() => expect(mediaRecorderInstances.length).toBe(2));
+
+    // İkinci bir wake-word: yeni döngü (#2) flush edilir ama hiç veri almadı
+    // (chunks.length===0) — bu yüzden latestAudioChunkRef GÜNCELLENMEZ. Eğer
+    // ref birinci gönderimden sonra temizlenmemiş olsaydı, burada YANLIŞLIKLA
+    // "eski-ses" tekrar gönderilirdi (bayat/başka birine ait ses riski).
+    kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', say: 'Tanınamadı' });
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio ışıkları aç')); });
+
+    await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(2));
+    expect(kioskAPI.voiceCommand.mock.calls[1][2].audio).toBeNull();
+    unmount();
+  });
+
+  it('recordCycle MediaRecorder oluşturma/start sırasında hata verirse (ör. track bitti) döngü SESSİZCE durur, hata fırlatmaz ve latestAudioChunkRef temizlenir', async () => {
+    kioskAPI.status.mockResolvedValueOnce({ active: true, surgeryId: 'surg1' });
+
+    let constructCount = 0;
+    class FailingSecondMediaRecorder extends MockMediaRecorder {
+      constructor(stream) {
+        constructCount += 1;
+        if (constructCount === 2) throw new DOMException('Track ended', 'InvalidStateError');
+        super(stream);
+      }
+    }
+    vi.stubGlobal('MediaRecorder', FailingSecondMediaRecorder);
+
+    const { unmount } = renderStartedHook();
+    await waitFor(() => expect(mediaRecorderInstances.length).toBe(1));
+    await waitFor(() => expect(recognitionInstances.length).toBe(1));
+
+    mediaRecorderInstances[0].ondataavailable({ data: new Blob(['ses-once'], { type: 'audio/webm' }) });
+
+    // Birinci döngüyü bitir: onstop içinde recordCycle(stream) ÇAĞRILIR, bu da
+    // 2. MediaRecorder'ı oluşturmaya çalışır ve FailingSecondMediaRecorder throw eder —
+    // recordCycle'ın kendi try/catch'i bunu yakalamalı, dışa (buraya) hiçbir şey sızmamalı.
+    expect(() => mediaRecorderInstances[0].stop()).not.toThrow();
+
+    // constructor throw ettiğinde super() çağrılmadığı için push() çalışmaz —
+    // döngü burada durmuş olmalı (yeni bir instance YOK).
+    expect(mediaRecorderInstances.length).toBe(1);
+
+    // latestAudioChunkRef'in catch bloğunda temizlendiğini doğrula: bir sonraki
+    // wake-word'ün gönderdiği ses audio:null olmalı (ne "ses-once" ne başka bir şey).
+    kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', say: 'Tanınamadı' });
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
+
+    await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(1));
+    expect(kioskAPI.voiceCommand.mock.calls[0][2].audio).toBeNull();
+    unmount();
+  });
+});
+
+describe('useVoiceDeviceControl — awaiting_confirmation istemci TTL\'i (final review Finding 3)', () => {
+  it('20 saniye içinde yanıt gelmezse awaiting_confirmation kendiliğinden idle\'a döner', async () => {
+    vi.useFakeTimers();
+    kioskAPI.status.mockResolvedValueOnce({ active: true, surgeryId: 'surg1' });
+    kioskAPI.voiceCommand.mockResolvedValueOnce({
+      type: 'DEVICE_COMMAND', status: 'pending_confirmation', say: 'Koteri açmak istediğinize eminmisiniz?',
+    });
+
+    const { result, unmount } = renderStartedHook();
+    await vi.waitFor(() => expect(result.current.state).toBe('idle'));
+
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
+    await vi.waitFor(() => expect(result.current.state).toBe('awaiting_confirmation'));
+
+    await vi.advanceTimersByTimeAsync(19999);
+    expect(result.current.state).toBe('awaiting_confirmation');
+
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.waitFor(() => expect(result.current.state).toBe('idle'));
+    unmount();
+  });
+
+  it('onay süresi dolmadan cevaplanırsa TTL zamanlayıcısı iptal edilir — daha sonra başlayan YENİ bir onayı yanlışlıkla kesmez', async () => {
+    vi.useFakeTimers();
+    kioskAPI.status.mockResolvedValueOnce({ active: true, surgeryId: 'surg1' });
+    kioskAPI.voiceCommand.mockResolvedValueOnce({
+      type: 'DEVICE_COMMAND', status: 'pending_confirmation', say: 'Koteri açmak istediğinize eminmisiniz?',
+    });
+
+    const { result, unmount } = renderStartedHook();
+    await vi.waitFor(() => expect(result.current.state).toBe('idle'));
+
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
+    await vi.waitFor(() => expect(result.current.state).toBe('awaiting_confirmation'));
+
+    // TTL dolmadan (5s) cevaplanır.
+    await vi.advanceTimersByTimeAsync(5000);
+    kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', say: 'Koter açıldı' });
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio evet')); });
+    await vi.waitFor(() => expect(result.current.state).toBe('idle'));
+
+    // YENİ bir onay başlatılır.
+    kioskAPI.voiceCommand.mockResolvedValueOnce({
+      type: 'DEVICE_COMMAND', status: 'pending_confirmation', say: 'Masayı 10 derece eğmemi istiyorsunuz, doğru mu?',
+    });
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio masayı eğ')); });
+    await vi.waitFor(() => expect(result.current.state).toBe('awaiting_confirmation'));
+
+    // Toplam geçen süre ilk onaydan beri 5s + 16s = 21s > 20s'lik orijinal pencere.
+    // ESKİ zamanlayıcı temizlenmediyse, bu YENİ onayı erken (süresi dolmuş gibi) keserdi.
+    await vi.advanceTimersByTimeAsync(16000);
+    expect(result.current.state).toBe('awaiting_confirmation');
+    unmount();
+  });
+
+  it('unmount olduğunda awaiting_confirmation TTL zamanlayıcısı da temizlenir (unmount sonrası setState çağrılmaz)', async () => {
+    vi.useFakeTimers();
+    kioskAPI.status.mockResolvedValueOnce({ active: true, surgeryId: 'surg1' });
+    kioskAPI.voiceCommand.mockResolvedValueOnce({
+      type: 'DEVICE_COMMAND', status: 'pending_confirmation', say: 'Koteri açmak istediğinize eminmisiniz?',
+    });
+
+    const { result, unmount } = renderStartedHook();
+    await vi.waitFor(() => expect(result.current.state).toBe('idle'));
+
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
+    await vi.waitFor(() => expect(result.current.state).toBe('awaiting_confirmation'));
+
+    const callsBeforeUnmount = kioskAPI.voiceCommand.mock.calls.length;
+    unmount();
+
+    // TTL zamanlayıcısı stopPipeline() -> clearConfirmationTimeout() ile iptal
+    // edilmiş olmalı: zamanlayıcının normalde ateşleyeceği an GEÇTİKTEN sonra bile
+    // hiçbir hata fırlatılmamalı VE unmount edilmiş hook yeni bir voiceCommand
+    // çağrısı tetiklememeli (temizlenmemiş olsaydı setPhase('idle') unmount
+    // sonrası bir state update'i denerdi — bu da en azından bir React uyarısına
+    // yol açardı, ama bir yan etkisi/isteği OLMAMALI).
+    await expect(vi.advanceTimersByTimeAsync(20000)).resolves.not.toThrow();
+    expect(kioskAPI.voiceCommand.mock.calls.length).toBe(callsBeforeUnmount);
+  });
+});
+
+describe('useVoiceDeviceControl — final review Finding 5 (ufak düzeltmeler)', () => {
+  it('say:null pending_confirmation yanıtı lastResponse\'u EZMEZ — ekrandaki asıl onay sorusu görünür kalır', async () => {
+    kioskAPI.voiceCommand.mockResolvedValueOnce({
+      type: 'DEVICE_COMMAND', status: 'pending_confirmation', say: 'Koteri açmak istediğinize eminmisiniz?',
+    });
+    const { result, unmount } = await renderIdleHook();
+
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
+    await waitFor(() => expect(result.current.state).toBe('awaiting_confirmation'));
+    const firstResponse = result.current.lastResponse;
+    expect(firstResponse.say).toBe('Koteri açmak istediğinize eminmisiniz?');
+
+    // Belirsiz (say:null) bir ASR sonucu — backend hâlâ bekliyor, hiçbir şey okunmuyor.
+    kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', status: 'pending_confirmation', say: null });
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio mmm')); });
+
+    await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(2));
+    // lastResponse AYNI referans kalmalı — say:null yanıtı onu EZMEMİŞ olmalı.
+    expect(result.current.lastResponse).toBe(firstResponse);
+    expect(result.current.state).toBe('awaiting_confirmation');
+    unmount();
+  });
+
+  it('efekt roomId değişimiyle yeniden kurulduğunda, eski (ölü) döngünün GEÇ gelen onstop\'u yeni akışı bozmaz (stale-cycle guard)', async () => {
+    kioskAPI.status.mockResolvedValue({ active: true, surgeryId: 'surg1' });
+
+    // Varsayılan beforeEach mock'u HER çağrıda AYNI fakeStream nesnesini döndürür
+    // (mockResolvedValue, Once değil) — bu testte roomId değişimiyle gerçekten
+    // FARKLI bir stream alındığını simüle etmek için her çağrıda yeni bir nesne
+    // döndüren bir implementasyon kullanıyoruz.
+    let streamSeq = 0;
+    navigator.mediaDevices.getUserMedia = vi.fn().mockImplementation(
+      () => Promise.resolve({ getTracks: () => [{ stop: vi.fn() }], seq: streamSeq++ }),
+    );
+
+    const hook = renderHook(
+      ({ roomId, token }) => useVoiceDeviceControlModule.useVoiceDeviceControl(roomId, token),
+      { initialProps: { roomId: 'room-A', token: 'tok-A' } },
+    );
+    act(() => { hook.result.current.start(); });
+    await waitFor(() => expect(hook.result.current.state).toBe('idle'));
+    await waitFor(() => expect(mediaRecorderInstances.length).toBe(1));
+    const oldCycleRecorder = mediaRecorderInstances[0];
+    const oldStream = oldCycleRecorder.stream;
+
+    hook.rerender({ roomId: 'room-B', token: 'tok-A' });
+    await waitFor(() => expect(mediaRecorderInstances.length).toBe(2));
+    const newCycleRecorder = mediaRecorderInstances[1];
+    expect(newCycleRecorder.stream).not.toBe(oldStream);
+    expect(newCycleRecorder.state).toBe('recording');
+
+    // Gerçek bir tarayıcıda eski recorder'ın 'stop' olayı ASENKRON gelir; burada
+    // bunu doğrudan tetikleyerek, yeni efekt mediaRecorderRef'i zaten YENİ stream'e
+    // taşıdıktan SONRA bu geç olayın geldiğini simüle ediyoruz.
+    expect(() => oldCycleRecorder.onstop()).not.toThrow();
+
+    // Guard tetiklenmeli: ölü (eski) stream için YENİ bir MediaRecorder OLUŞTURULMAMALI.
+    expect(mediaRecorderInstances.length).toBe(2);
+    expect(newCycleRecorder.state).toBe('recording');
+    hook.unmount();
+  });
+});
+
 describe('useVoiceDeviceControl — yanıt tipleri', () => {
   it('TIMEOUT yanıtındaki iki cümle sırayla speechSynthesis ile okunur, state idle\'a döner', async () => {
     kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'TIMEOUT', say: ['Sizi dinleyemedim.', 'Tekrar deneyin.'] });
@@ -377,6 +654,16 @@ describe('useVoiceDeviceControl — yanıt tipleri', () => {
 
     act(() => { recognitionInstances[0].onresult(finalResult('Operio ışıkları aç')); });
 
+    // Not: Finding 1'in flush-on-wake-word'ü handleWakeWordUtterance'ı ASENKRON
+    // yaptı (await flushCurrentRecording() öncesi) — bu, sendVoiceCommand'ın artık
+    // SENKRON olarak act() içinde ÇAĞRILMADIĞI anlamına gelir. Tetikleme ÖNCESİ
+    // state ZATEN 'idle' olduğundan (renderIdleHook), state===idle'ı DOĞRUDAN
+    // beklemek YARIŞ durumu yaratır: waitFor'un İLK (senkron) kontrolü, gerçek
+    // yanıt turu henüz BAŞLAMADAN, hâlâ eski/bayat 'idle' değerini görüp
+    // YANLIŞLIKLA hemen başarılı olabilir. Bunu önlemek için önce voiceCommand'ın
+    // GERÇEKTEN çağrıldığını (tetikleme öncesi KESİNLİKLE yanlış olan bir koşul)
+    // bekliyoruz — bu, gerçek turun başladığından emin olmanın güvenilir yolu.
+    await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(result.current.state).toBe('idle'));
     expect(spokenTexts()).toEqual(['Sizi dinleyemedim.', 'Tekrar deneyin.']);
     expect(result.current.lastResponse).toEqual({ type: 'TIMEOUT', say: ['Sizi dinleyemedim.', 'Tekrar deneyin.'] });
@@ -466,6 +753,12 @@ describe('useVoiceDeviceControl — yanıt tipleri', () => {
 
     act(() => { recognitionInstances[0].onresult(finalResult('Operio hava durumu nedir')); });
 
+    // Not: Finding 1 (flush-on-wake-word) handleWakeWordUtterance'ı ASENKRON yaptı;
+    // tetikleme öncesi state ZATEN 'idle' olduğundan, doğrudan state===idle beklemek
+    // yarış durumu yaratır (waitFor'un ilk senkron kontrolü bayat 'idle'yi görüp
+    // yanıt turu hiç başlamadan başarılı olabilir) — önce gerçek turun başladığını
+    // garantiye alıyoruz.
+    await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(result.current.state).toBe('idle'));
     expect(lastSpokenText()).toBe('İşte bulduğum sonuç.');
     expect(result.current.lastResponse).toEqual({ type: 'WEB_SEARCH', say: 'İşte bulduğum sonuç.' });
@@ -477,6 +770,9 @@ describe('useVoiceDeviceControl — yanıt tipleri', () => {
 
     act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
 
+    // Not: bkz. yukarıdaki "say-only yanıtlar" testindeki açıklama — aynı yarış
+    // durumu, tetikleme ÖNCESİ de 'idle' olan bir state için geçerli.
+    await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(result.current.state).toBe('idle'));
     expect(lastSpokenText()).toBe('Üzgünüm, sesinizi tanıyamadım.');
   });
@@ -507,6 +803,8 @@ describe('useVoiceDeviceControl — yanıt tipleri', () => {
 
     act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
 
+    // Not: bkz. "say-only yanıtlar" testindeki açıklama — aynı yarış durumu.
+    await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(result.current.state).toBe('idle'));
     expect(lastSpokenText()).toBe('Bir hata oluştu, lütfen tekrar deneyin.');
   });
