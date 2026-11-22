@@ -3,6 +3,7 @@ import supertest from 'supertest';
 import { signAccessToken } from '../../src/utils/jwt.js';
 import registry from '../../src/services/_registry.js';
 import app from '../../src/app.js';
+import { EMBEDDING_FAILED_MESSAGE } from '../../src/services/voiceProfile.service.js';
 
 const request = supertest(app);
 const mockVoiceProfileService = {
@@ -77,7 +78,7 @@ describe('POST /api/profile/voice-enrollment', () => {
 
   it('servis bir örnek için embedding çıkarılamadığını bildirirse → 400 (500 değil)', async () => {
     mockVoiceProfileService.enrollVoiceProfile.mockRejectedValueOnce(
-      new Error('Ses örneklerinden biri için embedding çıkarılamadı (konuşma tespit edilemedi)')
+      new Error(EMBEDDING_FAILED_MESSAGE)
     );
 
     const res = await request

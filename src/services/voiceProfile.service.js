@@ -11,6 +11,13 @@ const MODEL_VERSION = 'ecapa-tdnn-v1';
 const ENROLLMENT_SAMPLE_COUNT = 3;
 
 /**
+ * EMBEDDING_FAILED_MESSAGE — enrollVoiceProfile bir örnekten embedding
+ * çıkaramadığında fırlattığı hata mesajı. Route bu sabiti eşleştirip 400'e
+ * çevirir; mesaj değişirse route ve testler birlikte kırılır.
+ */
+const EMBEDDING_FAILED_MESSAGE = 'Ses örneklerinden biri için embedding çıkarılamadı (konuşma tespit edilemedi)';
+
+/**
  * serializeEmbedding — bir embedding vektörünü (number[]) BYTEA sütununda
  * saklanabilecek bir Buffer'a çevirir.
  *
@@ -100,7 +107,7 @@ async function enrollVoiceProfile(userId, audioSamples) {
     audioSamples.map((sample) => speakerIdClient.getEmbedding(sample))
   );
   if (embeddings.some((embedding) => embedding === null)) {
-    throw new Error('Ses örneklerinden biri için embedding çıkarılamadı (konuşma tespit edilemedi)');
+    throw new Error(EMBEDDING_FAILED_MESSAGE);
   }
 
   const centroid = averageEmbeddings(embeddings);
@@ -151,6 +158,7 @@ async function getEmbeddingsForUsers(userIds) {
 
 module.exports = {
   MODEL_VERSION,
+  EMBEDDING_FAILED_MESSAGE,
   serializeEmbedding,
   deserializeEmbedding,
   enrollVoiceProfile,
