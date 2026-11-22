@@ -7,6 +7,12 @@ vi.mock('../../src/services/api.js', () => ({
     list: vi.fn().mockResolvedValue([{ id: 'd1', name: 'Elektrokoter', mode: 'SIM' }]),
     updateConfig: vi.fn().mockResolvedValue({ id: 'd1', mode: 'REAL' }),
   },
+  kioskAdminAPI: {
+    createToken:   vi.fn().mockResolvedValue({ token: 'tok', kioskUrl: '/kiosk/x' }),
+    revokeToken:   vi.fn().mockResolvedValue({ revoked: true }),
+    getMockConfig: vi.fn().mockResolvedValue({ mode: 'always_match', cycleIndex: 0 }),
+    setMockConfig: vi.fn().mockResolvedValue({ mode: 'always_match', cycleIndex: 0 }),
+  },
 }));
 
 describe('SesliKontrolAyarlari', () => {

@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useDataStore, useUIStore } from '../store';
-import { deviceAPI } from '../services/api.js';
+import { deviceAPI, kioskAdminAPI } from '../services/api.js';
 import { DEVICE_GROUPS, deviceGroupLabel } from '../data/deviceGroups.js';
+
+// Konuşmacı doğrulama (mock) modları — backend enum'una Türkçe etiketle eşleniyor.
+const MOCK_MODES = [
+  { value: 'always_match',          label: 'Her Zaman Eşleştir' },
+  { value: 'always_reject_team',    label: 'Her Zaman Reddet (Ekipte Değil)' },
+  { value: 'always_unrecognized',   label: 'Her Zaman Tanınmadı' },
+  { value: 'cycle',                 label: 'Sırayla Değiştir' },
+];
 
 // Şu an backend registry.js'te kayıtlı tek sürücü 'mock'; yeni sürücüler eklendiğinde
 // buraya eklenir. Cihazın mevcut driver_key'i listede yoksa seçenek olarak eklenir —
@@ -20,11 +28,29 @@ export default function SesliKontrolAyarlari() {
   const [form, setForm]             = useState(EMPTY_FORM);
   const [creating, setCreating]     = useState(false);
 
+  // Kiosk kurulumu — oda bazlı üretilen token/URL (bu oturumda)
+  const [kioskTokens, setKioskTokens] = useState({});
+  const [kioskBusy, setKioskBusy]     = useState({});
+
+  // Konuşmacı doğrulama (demo mock-config)
+  const [mockMode, setMockMode]              = useState('');
+  const [mockConfigYukleniyor, setMockConfigYukleniyor] = useState(true);
+
   useEffect(() => {
     deviceAPI.list()
       .then(list => setDevices(Array.isArray(list) ? list : []))
       .catch(() => showToast('Cihaz listesi alınamadı'))
       .finally(() => setYukleniyor(false));
+  }, []);
+
+  useEffect(() => {
+    kioskAdminAPI.getMockConfig()
+      .then(cfg => setMockMode(cfg?.mode || 'always_match'))
+      .catch(e => {
+        showToast('Mock config alınamadı: ' + (e?.message || ''));
+        setMockMode('always_match');
+      })
+      .finally(() => setMockConfigYukleniyor(false));
   }, []);
 
   function setBusy(id, busy) {
@@ -77,6 +103,62 @@ export default function SesliKontrolAyarlari() {
   function roomLabel(roomId) {
     const r = rooms.find(x => x.id === roomId);
     return r ? (r.ad || r.name) : '—';
+  }
+
+  function setKioskBusyFor(roomId, busy) {
+    setKioskBusy(p => ({ ...p, [roomId]: busy }));
+  }
+
+  async function createKioskToken(roomId) {
+    setKioskBusyFor(roomId, true);
+    try {
+      const { token, kioskUrl } = await kioskAdminAPI.createToken(roomId);
+      const fullUrl = `${window.location.origin}${kioskUrl}?token=${token}`;
+      setKioskTokens(prev => ({ ...prev, [roomId]: { token, kioskUrl, fullUrl } }));
+    } catch (e) {
+      showToast('Kiosk token üretilemedi: ' + (e?.message || ''));
+    } finally {
+      setKioskBusyFor(roomId, false);
+    }
+  }
+
+  async function revokeKioskToken(roomId) {
+    setKioskBusyFor(roomId, true);
+    try {
+      await kioskAdminAPI.revokeToken(roomId);
+      setKioskTokens(prev => {
+        const next = { ...prev };
+        delete next[roomId];
+        return next;
+      });
+      showToast('Kiosk token iptal edildi ✓');
+    } catch (e) {
+      showToast('Token iptal edilemedi: ' + (e?.message || ''));
+    } finally {
+      setKioskBusyFor(roomId, false);
+    }
+  }
+
+  async function copyKioskUrl(fullUrl) {
+    try {
+      await navigator.clipboard.writeText(fullUrl);
+      showToast('Kopyalandı ✓');
+    } catch (e) {
+      showToast('Kopyalanamadı: ' + (e?.message || ''));
+    }
+  }
+
+  async function changeMockMode(newMode) {
+    const prevMode = mockMode;
+    setMockMode(newMode);
+    try {
+      const result = await kioskAdminAPI.setMockConfig(newMode);
+      setMockMode(result?.mode || newMode);
+      showToast('Konuşmacı doğrulama modu güncellendi ✓');
+    } catch (e) {
+      setMockMode(prevMode);
+      showToast('Mod güncellenemedi: ' + (e?.message || ''));
+    }
   }
 
   return (
@@ -140,6 +222,89 @@ export default function SesliKontrolAyarlari() {
             </button>
           </div>
         </form>
+      </div>
+
+      {/* Kiosk Kurulumu */}
+      <div className="panel" style={{ marginBottom: 20, padding: 18 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--slate)', marginBottom: 12 }}>
+          Kiosk Kurulumu
+        </div>
+        {rooms.length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--slate-light)' }}>Tanımlı salon bulunamadı</div>
+        ) : (
+          rooms.map(room => {
+            const busy = !!kioskBusy[room.id];
+            const entry = kioskTokens[room.id];
+            const name = room.ad || room.name;
+            return (
+              <div key={room.id} style={{ paddingBottom: 14, marginBottom: 14, borderBottom: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--slate)' }}>{name}</div>
+                  <div className="mf">
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={busy}
+                      onClick={() => createKioskToken(room.id)}
+                    >
+                      {busy ? 'İşleniyor…' : 'Kiosk Token Üret'}
+                    </button>
+                    {entry && (
+                      <button
+                        type="button"
+                        className="btn btn-danger"
+                        disabled={busy}
+                        onClick={() => revokeKioskToken(room.id)}
+                      >
+                        Token'ı İptal Et
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {entry && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+                    <input
+                      aria-label={`${name} kiosk url`}
+                      className="fi"
+                      readOnly
+                      value={entry.fullUrl}
+                      onFocus={e => e.target.select()}
+                      style={{ flex: 1, fontSize: 12 }}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => copyKioskUrl(entry.fullUrl)}
+                    >
+                      Kopyala
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* Konuşmacı Doğrulama (Demo) */}
+      <div className="panel" style={{ marginBottom: 20, padding: 18 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--slate)', marginBottom: 12 }}>
+          Konuşmacı Doğrulama (Demo)
+        </div>
+        <div className="fg" style={{ maxWidth: 360 }}>
+          <label className="fl" htmlFor="sk-mock-mode">Doğrulama Senaryosu</label>
+          <select
+            id="sk-mock-mode"
+            aria-label="Konuşmacı Doğrulama (Demo)"
+            className="fi"
+            value={mockMode}
+            disabled={mockConfigYukleniyor}
+            onChange={e => changeMockMode(e.target.value)}
+          >
+            {mockMode === '' && <option value="">—</option>}
+            {MOCK_MODES.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </div>
       </div>
 
       {/* Cihaz listesi */}
