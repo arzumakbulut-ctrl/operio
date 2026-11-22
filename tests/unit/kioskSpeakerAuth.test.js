@@ -54,6 +54,31 @@ describe('getSpeakerVerifier dispatch', () => {
   });
 });
 
+describe('kioskSpeakerAuth call site (real mode)', () => {
+  it('config.mode "real" iken middleware RealSpeakerVerifier.identify()\'ı (audio, candidateUserIds, config) ile çağırır', async () => {
+    const config = { mode: 'real', cycleIndex: 0 };
+    mockKioskService.getMockConfig.mockResolvedValueOnce(config);
+    const spy = vi
+      .spyOn(RealSpeakerVerifier.prototype, 'identify')
+      .mockResolvedValueOnce({ userId: 'user-1', score: 0.9 });
+
+    try {
+      const req = makeReq();
+      const { res } = makeRes();
+      const next = vi.fn();
+
+      await kioskSpeakerAuth(req, res, next);
+
+      expect(spy).toHaveBeenCalledOnce();
+      expect(spy).toHaveBeenCalledWith(req.body.audio, ['user-1', 'user-2'], config);
+      expect(next).toHaveBeenCalledOnce();
+      expect(req.speaker.userId).toBe('user-1');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe('kioskSpeakerAuth', () => {
   it('(a) identify() tanıyamazsa (always_unrecognized) 403 unrecognized döner — mesaj "Sizi tanıyamadım" İÇERİR, hiçbir isim İÇERMEZ', async () => {
     mockKioskService.getMockConfig.mockResolvedValueOnce({ mode: 'always_unrecognized', cycleIndex: 0 });
