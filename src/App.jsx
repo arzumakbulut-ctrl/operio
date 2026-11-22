@@ -4,6 +4,7 @@ import { useSocket } from './hooks/useSocket';
 import { useAuthStore, useDataStore } from './store';
 import AuthScreen from './components/auth/AuthScreen';
 import AppLayout from './components/layout/AppLayout';
+import Kiosk from './pages/Kiosk';
 import Toast from './components/ui/Toast';
 import ConnectionStatus from './components/ui/ConnectionStatus';
 
@@ -155,6 +156,9 @@ export default function App() {
       <Routes>
         {/* Auth */}
         <Route path="/giris" element={isLoggedIn ? <Navigate to="/dashboard" replace /> : <AuthScreen />} />
+
+        {/* Kiosk — odaya sabit ekran, kişisel giriş guard'ından MUAF (kendi kiosk-token mantığıyla çalışır) */}
+        <Route path="/kiosk/:roomId" element={<Kiosk />} />
 
         {/* ── GENEL ── */}
         <Route path="/dashboard"   element={<ProtectedLayout><Dashboard /></ProtectedLayout>} />
