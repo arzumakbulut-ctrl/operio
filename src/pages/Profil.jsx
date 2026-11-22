@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuthStore, useUIStore } from '../store';
 import { ROLES } from '../data/roles';
 import Modal from '../components/ui/Modal';
-import { voiceProfileAPI } from '../services/api.js';
+import { voiceProfileAPI, spotifyAPI } from '../services/api.js';
 
 // Kayıt sırasında kullanıcıya okutulan sabit pasaj — plan kararı, aynen kullanılıyor.
 const SES_PASAJI = 'Operio ses profilimi oluşturuyorum, bu cümleyi kendi doğal konuşma hızımla okuyorum.';
@@ -37,6 +37,9 @@ export default function Profil() {
   const recorderRef = useRef(null);
   const kayitTimeoutRef = useRef(null);
 
+  // Spotify hesabı bağlantısı (OAuth — tam sayfa yönlendirmesiyle çalışır)
+  const [spotifyBagli, setSpotifyBagli] = useState(false);
+
   useEffect(() => {
     fetch('http://localhost:4000/api/auth/me', {
       headers: { 'Authorization': 'Bearer ' + token }
@@ -55,6 +58,47 @@ export default function Profil() {
       if (kayitTimeoutRef.current) clearTimeout(kayitTimeoutRef.current);
     };
   }, []);
+
+  // Spotify OAuth, backend'in /api/spotify/callback'inden tam sayfa yönlendirmesiyle
+  // geri döner (?spotify=connected|error) — başka bir "bağlı mı?" durum kontrolü
+  // (getStatus) backend'de henüz yok, bu yüzden bağlı durumu sadece bu dönüşten
+  // anlaşılabiliyor ve sayfa taze mount olduğunda varsayılan "bağlı değil"dir.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const spotifyParam = params.get('spotify');
+    if (spotifyParam === 'connected') {
+      setSpotifyBagli(true);
+      showToast('Spotify hesabınız bağlandı');
+    } else if (spotifyParam === 'error') {
+      showToast('Spotify bağlantısı başarısız oldu, lütfen tekrar deneyin');
+    }
+    if (spotifyParam) {
+      // Query param'ı URL'den sil — aksi halde sayfa yenilendiğinde toast tekrar tetiklenir.
+      params.delete('spotify');
+      const yeniArama = params.toString();
+      const yeniUrl = window.location.pathname + (yeniArama ? `?${yeniArama}` : '') + window.location.hash;
+      window.history.replaceState({}, '', yeniUrl);
+    }
+  }, []);
+
+  async function spotifyBaglan() {
+    try {
+      const { url } = await spotifyAPI.connect();
+      window.location.href = url;
+    } catch (err) {
+      showToast('Spotify bağlantısı başlatılamadı');
+    }
+  }
+
+  async function spotifyBaglantiyiKaldir() {
+    try {
+      await spotifyAPI.disconnect();
+      setSpotifyBagli(false);
+      showToast('Spotify bağlantısı kaldırıldı');
+    } catch (err) {
+      showToast('Spotify bağlantısı kaldırılamadı');
+    }
+  }
 
   async function sesKaydiBaslat() {
     try {
@@ -282,6 +326,40 @@ export default function Profil() {
                     onClick={sesKaydiBaslat}
                   >
                     {kayitYapiliyor ? 'Kaydediliyor...' : kayitGonderiliyor ? 'Gönderiliyor...' : 'Kayda Başla'}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Spotify Hesabı */}
+          <div className="panel">
+            <div className="panel-hd">
+              <div className="panel-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight:6, verticalAlign:'middle' }}>
+                  <path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>
+                </svg>
+                Spotify Hesabı
+              </div>
+            </div>
+            <div style={{ padding:'14px 18px' }}>
+              {spotifyBagli ? (
+                <>
+                  <div style={{ fontSize:12.5, color:'var(--slate)', fontWeight:600 }}>Spotify hesabınız bağlı</div>
+                  <div style={{ fontSize:11, color:'var(--slate-light)', marginTop:4 }}>
+                    Kiosk sesli asistanı artık müzik çalabilir.
+                  </div>
+                  <button className="btn btn-secondary" style={{ marginTop:12 }} onClick={spotifyBaglantiyiKaldir}>
+                    Bağlantıyı Kaldır
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize:12, color:'var(--slate-light)', lineHeight:1.5 }}>
+                    Kiosk sesli asistanının müzik çalabilmesi için Spotify hesabınızı bağlayın.
+                  </div>
+                  <button className="btn btn-secondary" style={{ marginTop:12 }} onClick={spotifyBaglan}>
+                    Spotify Hesabımı Bağla
                   </button>
                 </>
               )}
