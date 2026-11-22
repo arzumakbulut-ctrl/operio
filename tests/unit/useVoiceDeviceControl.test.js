@@ -39,12 +39,20 @@ class MockMediaRecorder {
     this.stream = stream;
     this.state = 'inactive';
     this.ondataavailable = null;
+    this.onstop = null;
     this.startedWithTimeslice = null;
     this.stopped = 0;
     mediaRecorderInstances.push(this);
   }
   start(timeslice) { this.state = 'recording'; this.startedWithTimeslice = timeslice; }
-  stop() { this.state = 'inactive'; this.stopped += 1; }
+  stop() {
+    this.state = 'inactive';
+    this.stopped += 1;
+    // Gerçek MediaRecorder.stop() asenkron olarak 'stop' olayını tetikler;
+    // döngü-başı yeniden başlatma mantığı bu callback'e bağlı olduğu için
+    // mock da onstop'u çağırmalı (zaten atanmışsa).
+    if (this.onstop) this.onstop();
+  }
 }
 
 // Gerçek bir uzantı (wake-word) tetiklenmiş final SpeechRecognition sonucu üretir.
@@ -200,7 +208,10 @@ describe('useVoiceDeviceControl — mount / no_surgery', () => {
     expect(recognitionInstances[0].interimResults).toBe(false);
 
     await waitFor(() => expect(mediaRecorderInstances.length).toBe(1));
-    expect(mediaRecorderInstances[0].startedWithTimeslice).toBe(3000);
+    // Task 1 (döngü-başı taze MediaRecorder): recorder artık timeslice ile
+    // değil, kendi döngüsünü kendi yöneten setTimeout ile çalışıyor —
+    // bkz. 'ses yakalama — döngü-başı taze MediaRecorder' describe bloğu.
+    expect(mediaRecorderInstances[0].state).toBe('recording');
   });
 
   it('no_surgery iken 15 saniyede bir status tekrar denenir, başarılı olunca idle\'a döner', async () => {
@@ -267,55 +278,87 @@ describe('useVoiceDeviceControl — uyandırma kelimesi ("operio") çıkarımı'
   });
 });
 
-describe('useVoiceDeviceControl — dönen (rolling) MediaRecorder ses tamponu', () => {
-  it('ondataavailable İKİ KEZ tetiklenirse tampon sadece SON chunk\'ı tutar (biriktirmez); bu chunk base64\'e kodlanıp voiceCommand\'a "audio" olarak gönderilir', async () => {
-    kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', say: 'Koter açıldı' });
-    const { result } = await renderIdleHook();
-    await waitFor(() => expect(mediaRecorderInstances.length).toBe(1));
+describe('ses yakalama — döngü-başı taze MediaRecorder', () => {
+  it('her AUDIO_TIMESLICE_MS periyodunda YENİ bir MediaRecorder örneği oluşturulur (tek sürekli örnek değil)', async () => {
+    vi.useFakeTimers();
+    kioskAPI.status.mockResolvedValueOnce({ active: true, surgeryId: 'surg1' });
 
-    const recorder = mediaRecorderInstances[0];
-    // İlk 3 saniyelik parça — tampon bunu tutar...
-    act(() => { recorder.ondataavailable({ data: new Blob(['ilk-parca'], { type: 'audio/webm' }) }); });
-    // ...ama ikinci parça gelince ÜZERİNE YAZMALI, biriktirmemeli (ring buffer, tek chunk).
-    act(() => { recorder.ondataavailable({ data: new Blob(['son-parca'], { type: 'audio/webm' }) }); });
+    renderStartedHook();
+    await vi.waitFor(() => expect(mediaRecorderInstances.length).toBe(1));
 
-    act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.waitFor(() => expect(mediaRecorderInstances.length).toBe(2));
 
-    await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(1));
-    const [, , body] = kioskAPI.voiceCommand.mock.calls[0];
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.waitFor(() => expect(mediaRecorderInstances.length).toBe(3));
 
-    expect(typeof body.audio).toBe('string');
-    expect(body.audio.length).toBeGreaterThan(0);
-    // blobToBase64 (FileReader.readAsDataURL + prefix temizleme) doğru çalışıyor mu —
-    // decode edilince SADECE en son chunk'ın içeriği çıkmalı, ilkiyle birleşmiş olmamalı.
-    expect(atob(body.audio)).toBe('son-parca');
-
-    await waitFor(() => expect(result.current.state).toBe('idle'));
+    // Üç farklı (ayrı) MediaRecorder örneği — tek sürekli örnek üzerinde
+    // tekrar start() çağrılmış değil.
+    expect(mediaRecorderInstances[0]).not.toBe(mediaRecorderInstances[1]);
+    expect(mediaRecorderInstances[1]).not.toBe(mediaRecorderInstances[2]);
   });
 
-  it('ondataavailable boş (size:0) veri ile tetiklenirse tampon güncellenmez (önceki chunk korunur)', async () => {
-    kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', say: 'Koter açıldı' });
-    const { result } = await renderIdleHook();
-    await waitFor(() => expect(mediaRecorderInstances.length).toBe(1));
+  it('getUserMedia audio kısıtlarına noiseSuppression ve echoCancellation ister', async () => {
+    await renderIdleHook();
+    await waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1));
 
-    const recorder = mediaRecorderInstances[0];
-    act(() => { recorder.ondataavailable({ data: new Blob(['gercek-parca'], { type: 'audio/webm' }) }); });
-    // Boş bir chunk (bazı tarayıcılarda sessizlik için size:0 Blob gelebilir) tamponu silmemeli.
-    act(() => { recorder.ondataavailable({ data: new Blob([], { type: 'audio/webm' }) }); });
-
-    act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
-
-    await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(1));
-    const [, , body] = kioskAPI.voiceCommand.mock.calls[0];
-    expect(atob(body.audio)).toBe('gercek-parca');
-
-    await waitFor(() => expect(result.current.state).toBe('idle'));
+    const [constraints] = navigator.mediaDevices.getUserMedia.mock.calls[0];
+    expect(constraints.audio.noiseSuppression).toBe(true);
+    expect(constraints.audio.echoCancellation).toBe(true);
   });
 
-  it('hiç ondataavailable tetiklenmemişse (tampon boş) voiceCommand audio:null ile çağrılır (çökmez)', async () => {
+  it('her döngünün bitmiş blob\'u latestAudioChunkRef\'e (dolaylı: sendVoiceCommand\'a) eşdeğer şekilde ulaşır', async () => {
+    vi.useFakeTimers();
+    kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', say: 'Koter açıldı' });
+    kioskAPI.status.mockResolvedValueOnce({ active: true, surgeryId: 'surg1' });
+
+    renderStartedHook();
+    await vi.waitFor(() => expect(mediaRecorderInstances.length).toBe(1));
+    await vi.waitFor(() => expect(recognitionInstances.length).toBe(1));
+
+    const firstCycleRecorder = mediaRecorderInstances[0];
+    act(() => {
+      firstCycleRecorder.ondataavailable({ data: new Blob(['dongu-parcasi'], { type: 'audio/webm' }) });
+    });
+
+    // Döngüyü bitir: setTimeout(AUDIO_TIMESLICE_MS) recorder.stop()'u tetikler,
+    // mock'un stop()'u onstop'u çağırır, onstop yeni bir recordCycle başlatır.
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.waitFor(() => expect(mediaRecorderInstances.length).toBe(2));
+
+    // İkinci döngü zaten başlamış olsa da, henüz hiç ondataavailable almadı —
+    // bu noktada bir wake-word ifadesi tetiklenirse gönderilen ses BİRİNCİ
+    // döngünün (tamamlanmış) blob'undan türemeli.
+    act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
+
+    await vi.waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(1));
+    const [, , body] = kioskAPI.voiceCommand.mock.calls[0];
+    expect(atob(body.audio)).toBe('dongu-parcasi');
+  });
+
+  it('unmount olunca veya no_surgery\'ye geçince döngü yeniden başlamaz', async () => {
+    vi.useFakeTimers();
+    kioskAPI.status.mockResolvedValueOnce({ active: true, surgeryId: 'surg1' });
+
+    const { unmount } = renderStartedHook();
+    await vi.waitFor(() => expect(mediaRecorderInstances.length).toBe(1));
+
+    const countBeforeUnmount = mediaRecorderInstances.length;
+    unmount();
+
+    // Döngünün zamanlanmış setTimeout'u yine de ateşlenir (temizlenmiyor),
+    // ama onstop içindeki unmountedRef kontrolü yeni bir MediaRecorder
+    // OLUŞTURULMASINI engellemeli.
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(mediaRecorderInstances.length).toBe(countBeforeUnmount);
+  });
+
+  it('mikrofon izni reddedilirse (getUserMedia reject) ses hattı sessizce audio:null ile çalışmaya devam eder', async () => {
+    navigator.mediaDevices.getUserMedia.mockRejectedValueOnce(new Error('NotAllowedError'));
     kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', say: 'Koter açıldı' });
     const { result } = await renderIdleHook();
-    await waitFor(() => expect(mediaRecorderInstances.length).toBe(1));
+
+    expect(mediaRecorderInstances.length).toBe(0);
 
     act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
 

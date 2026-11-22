@@ -128,22 +128,44 @@ export function useVoiceDeviceControl(roomId, kioskToken) {
     try { recognition.start(); } catch { /* yoksay */ }
   }
 
+  // Her döngüde TAZE bir MediaRecorder örneği başlatır. WebM/Opus konteyner
+  // başlığı sadece bir recorder'ın İLK chunk'ında bulunur — sürekli/tek bir
+  // recorder üzerinde periyodik dataavailable kullanmak, ilk parça dışındaki
+  // tüm parçaları başlıksız (bağımsız decode edilemez) bırakır. Bu yüzden
+  // recorder, her AUDIO_TIMESLICE_MS'de stop() edilip (tam/kendi içinde
+  // tutarlı bir blob üretip) yeniden start() ediliyor — tek seferlik
+  // timeslice yerine kendi kendini yeniden başlatan bir döngü.
+  function recordCycle(stream) {
+    if (unmountedRef.current || phaseRef.current === 'no_surgery') return;
+    const chunks = [];
+    const recorder = new window.MediaRecorder(stream);
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) chunks.push(e.data);
+    };
+    recorder.onstop = () => {
+      if (chunks.length > 0) latestAudioChunkRef.current = new Blob(chunks, { type: 'audio/webm' });
+      recordCycle(stream);
+    };
+    recorder.start();
+    mediaRecorderRef.current = { recorder, stream };
+    setTimeout(() => {
+      try { recorder.stop(); } catch { /* zaten durmuş olabilir */ }
+    }, AUDIO_TIMESLICE_MS);
+  }
+
   async function startAudioCapture() {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) return;
     if (typeof window === 'undefined' || !window.MediaRecorder) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { noiseSuppression: true, echoCancellation: true },
+      });
       if (unmountedRef.current || phaseRef.current === 'no_surgery') {
         // Bu arada unmount/no_surgery olduysa hemen bırak — mikrofonu açık tutma.
         stream.getTracks().forEach((t) => t.stop());
         return;
       }
-      const recorder = new window.MediaRecorder(stream);
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) latestAudioChunkRef.current = e.data;
-      };
-      recorder.start(AUDIO_TIMESLICE_MS);
-      mediaRecorderRef.current = { recorder, stream };
+      recordCycle(stream);
     } catch {
       // Mikrofon izni verilmedi veya hata oluştu — komut hattı sessiz
       // (audio:null) olarak çalışmaya devam eder, bu kritik bir hata değil.
