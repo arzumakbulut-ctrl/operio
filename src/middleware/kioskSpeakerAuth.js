@@ -49,7 +49,11 @@ async function kioskSpeakerAuth(req, res, next) {
     const kioskService = getKioskService();
     const config = await kioskService.getMockConfig(institutionId);
 
-    const audioBuffer = req.body && req.body.audio;
+    // audio null/eksik olabilir (kiosk henüz bir ses parçası kaydetmemişken ya da mikrofon
+    // izni yokken — bkz. kioskVoiceCommandSchema). Verifier'a her durumda null olarak geçer;
+    // sözleşme (SpeakerVerifier.identify JSDoc): null ses örneği "eşleşme yok" demektir ve
+    // ASLA fırlatmamalıdır. MockSpeakerVerifier audioBuffer'ı zaten hiç kullanmaz.
+    const audioBuffer = (req.body && req.body.audio) ?? null;
     const verifier = getSpeakerVerifier();
     const result = await verifier.identify(audioBuffer, candidateUserIds, config);
 

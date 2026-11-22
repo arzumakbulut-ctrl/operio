@@ -136,4 +136,34 @@ describe('POST /api/kiosk/rooms/:roomId/voice-command', () => {
 
     expect(res.status).toBe(400);
   });
+
+  it('(i) audio: null (henüz ses parçası yok / mikrofon izni yok) → TIMEOUT yine 200 (zod 400 VERMEZ)', async () => {
+    const res = await request
+      .post('/api/kiosk/rooms/room-1/voice-command')
+      .set('Authorization', authHeader())
+      .send({ transcript: 'Operio time-out', audio: null });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.type).toBe('TIMEOUT');
+    expect(mockKioskService.recordTimeoutRead).toHaveBeenCalledTimes(1);
+  });
+
+  it('(j) audio alanı hiç gönderilmezse → TIMEOUT yine 200', async () => {
+    const res = await request
+      .post('/api/kiosk/rooms/room-1/voice-command')
+      .set('Authorization', authHeader())
+      .send({ transcript: 'Operio time-out' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.type).toBe('TIMEOUT');
+  });
+
+  it('(k) audio string olmayan bir tipteyse (sayı) hâlâ 400 döner', async () => {
+    const res = await request
+      .post('/api/kiosk/rooms/room-1/voice-command')
+      .set('Authorization', authHeader())
+      .send({ transcript: 'Operio time-out', audio: 123 });
+
+    expect(res.status).toBe(400);
+  });
 });

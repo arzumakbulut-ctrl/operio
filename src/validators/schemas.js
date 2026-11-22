@@ -177,7 +177,11 @@ const mockConfigSchema = z.object({
 // gönderecek — şema şimdiden buna izin veriyor ki ileride gevşetme ihtiyacı doğmasın.
 const kioskVoiceCommandSchema = z.object({
   transcript: z.string(),
-  audio: z.string(),
+  // audio null/eksik olabilir: kiosk istemcisi henüz bir MediaRecorder parçası yokken
+  // (mount sonrası ilk ~3sn) ya da mikrofon izni reddedildiğinde audio: null gönderir.
+  // TIMEOUT sese hiç ihtiyaç duymaz; konuşmacı-tanıma gereken dallarda null ses
+  // kioskSpeakerAuth → SpeakerVerifier'a "örnek yok" olarak geçer (bkz. kioskSpeakerAuth).
+  audio: z.string().nullable().optional(),
   confirmationPhrase: z.string().optional(),
 });
 

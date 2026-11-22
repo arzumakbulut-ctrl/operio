@@ -7,7 +7,10 @@
  */
 class SpeakerVerifier {
   /**
-   * @param {Buffer|any} audioBuffer — ses örneği (sürücüye göre değişir).
+   * @param {Buffer|any|null} audioBuffer — ses örneği (sürücüye göre değişir). null
+   *   olabilir (kiosk henüz ses parçası kaydetmemiş / mikrofon izni yok): gerçek bir
+   *   sürücü bu durumda FIRLATMAMALI, null ("tanınamadı") döndürmelidir. Mock sürücü
+   *   bu parametreyi hiç kullanmaz.
    * @param {string[]} candidateUserIds — bu odadaki aktif ameliyatın ekip üyelerinin userId'leri.
    * @param {{ mode: string, cycleIndex: number }} config — kurumun mock konuşmacı-doğrulama
    *   konfigürasyonu (kiosk.service.js'in getMockConfig'inden). Gerçek (mock olmayan) bir
