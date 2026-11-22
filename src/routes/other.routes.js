@@ -1,4 +1,6 @@
 const router = require('express').Router();
+const rateLimit = require('express-rate-limit');
+const Anthropic = require('@anthropic-ai/sdk');
 const { z } = require('zod');
 const { authenticate, authorize } = require('../middleware/auth');
 const { requireModule } = require('../middleware/requireModule');
@@ -20,6 +22,19 @@ const { ok, created, notFound, serverError } = require('../utils/response');
 const registry = require('../services/_registry');
 const getSterileSetService = () => registry.get('sterileSet', () => require('../services/sterileSet.service'));
 const getAiService = () => registry.get('ai', () => require('../services/ai.service'));
+
+// Vision-count Claude'u çağırır (LLM maliyetli) — ai.routes.js'teki aiLimiter ile aynı değerler.
+const visionLimiter = rateLimit({
+  windowMs: 60 * 1000,   // 1 dakika
+  max: 20,               // dakikada 20 istek
+  message: { success: false, error: { code: 'TOO_MANY_REQUESTS', message: 'Çok fazla AI isteği, lütfen bekleyin' } },
+});
+
+// Anthropic SDK'nın tüm upstream hataları (APIConnectionError, AuthenticationError,
+// RateLimitError, InternalServerError/529 ...) APIError'dan türer.
+function isUpstreamAiError(err) {
+  return err instanceof Anthropic.APIError;
+}
 
 // ── HASTALAR ─────────────────────────────────────────────────
 const patientRouter = require('express').Router();
@@ -141,14 +156,28 @@ setRouter.post('/:id/tracking', authorize(0,1,8,9), validate(setTrackingSchema),
 // ── OPERIO VISION — Sterilizasyon alet sayımı (fotoğraf → AI tahmini) ────
 // authorize() requireModule'DEN ÖNCE çalışır: yetkisiz bir rol modül aktif olsa
 // bile hiçbir zaman requireModule'e (ve dolayısıyla modül servisine) ulaşmaz.
-setRouter.post('/:id/vision-count', authorize(0,1,8,9), requireModule('vision_counting'), validate(visionCountSchema), async (req,res) => {
+setRouter.post('/:id/vision-count', authorize(0,1,8,9), requireModule('vision_counting'), visionLimiter, validate(visionCountSchema), async (req,res) => {
   try {
     const set = await getSterileSetService().getSet(req.params.id);
     if (!set) return notFound(res, 'Steril Set');
-    const result = await getAiService().countInstruments(
-      req.body.imageBase64, req.body.mediaType,
-      (set.instruments || []).map(i => ({ instrumentId: i.id, name: i.name, expectedCount: i.expected_count })),
-    );
+    let result;
+    try {
+      result = await getAiService().countInstruments(
+        req.body.imageBase64, req.body.mediaType,
+        (set.instruments || []).map(i => ({ instrumentId: i.id, name: i.name, expectedCount: i.expected_count })),
+      );
+    } catch (err) {
+      // Yalnızca Anthropic'ten gelen gerçek upstream hatalar (ağ, geçersiz key, 429/529...)
+      // 503'e çevrilir; diğer her şey dış catch'teki serverError() yoluna düşer.
+      if (isUpstreamAiError(err)) {
+        console.error('[VISION] Claude upstream hatası:', err.status ?? '', err.message);
+        return res.status(503).json({
+          success: false,
+          error: { code: 'AI_UNAVAILABLE', message: 'AI servisine şu anda ulaşılamıyor, lütfen daha sonra tekrar deneyin' },
+        });
+      }
+      throw err;
+    }
     await getSterileSetService().recordVisionSuggestion({ setId: req.params.id, suggestions: result.suggestions, userId: req.user.sub, req });
     return ok(res, result);
   } catch (err) { return serverError(res, err); }

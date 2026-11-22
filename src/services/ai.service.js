@@ -259,6 +259,19 @@ async function webSearch(query) {
  * @param {Array<{instrumentId: string, name: string, expectedCount: number}>} expectedInstruments
  * @returns {Promise<{ suggestions: Array<{instrumentId: string, name: string, expectedCount: number, detectedCount: number|null}>, parsed: boolean }>}
  */
+// set_instruments.last_suggested_count bir SMALLINT — üst sınırı budur.
+const SMALLINT_MAX = 32767;
+
+/**
+ * Claude'un döndürdüğü detectedCount'u doğrular: yalnızca 0..SMALLINT_MAX aralığındaki
+ * tam sayılar geçerlidir. String, ondalıklı, negatif, aralık dışı veya eksik değerler
+ * `null`a ("tespit edilemedi" işareti) çevrilir — böylece SMALLINT yazımı çökmez ve
+ * /tracking'in `z.number().int().min(0)` doğrulamasına geçersiz değer ulaşmaz.
+ */
+function normalizeDetectedCount(value) {
+  return Number.isInteger(value) && value >= 0 && value <= SMALLINT_MAX ? value : null;
+}
+
 async function countInstruments(imageBase64, mediaType, expectedInstruments) {
   const instrumentList = expectedInstruments
     .map(item => `- ${item.name}: beklenen adet ${item.expectedCount}`)
@@ -297,7 +310,8 @@ Listedeki her alet için "counts" dizisinde bir girdi olmalı; alet adlarını y
       .join('')
       .trim();
 
-    const match = text.match(/```json\n([\s\S]*?)\n```/);
+    // \s* ile hem CRLF satır sonlarını hem de ```json etiketinden sonraki boşluğu tolere eder
+    const match = text.match(/```json\s*([\s\S]*?)\s*```/);
     if (!match) {
       return { suggestions: [], parsed: false };
     }
@@ -311,7 +325,7 @@ Listedeki her alet için "counts" dizisinde bir girdi olmalı; alet adlarını y
         instrumentId:  expected.instrumentId,
         name:          expected.name,
         expectedCount: expected.expectedCount,
-        detectedCount: found ? found.detectedCount : null,
+        detectedCount: found ? normalizeDetectedCount(found.detectedCount) : null,
       };
     });
 

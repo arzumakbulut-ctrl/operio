@@ -3,6 +3,11 @@ import supertest from 'supertest';
 import { signAccessToken } from '../../src/utils/jwt.js';
 import registry from '../../src/services/_registry.js';
 import app from '../../src/app.js';
+import { createRequire } from 'module';
+
+// Route CJS `require('@anthropic-ai/sdk')` kullanıyor — `instanceof` kontrolünün tuttuğundan
+// emin olmak için hata sınıflarını AYNI CJS modül örneğinden alıyoruz (ESM build'i değil).
+const Anthropic = createRequire(import.meta.url)('@anthropic-ai/sdk');
 
 const request = supertest(app);
 const mockModuleService = { hasActiveModule: vi.fn().mockResolvedValue(true) };
@@ -69,6 +74,69 @@ describe('POST /api/sterile-sets/:id/vision-count', () => {
     const rejectedRes = await request.patch('/api/sterile-sets/s1')
       .set('Authorization', `Bearer ${tok(0)}`).send({ name: 'a'.repeat(700 * 1024) });
     expect(rejectedRes.status).toBe(413);
+  });
+
+  it('vision-count route\'unun KENDİ 4mb limitini aşan body 413 ile reddedilir', async () => {
+    const tooBig = { imageBase64: 'a'.repeat(4 * 1024 * 1024 + 1024), mediaType: 'image/jpeg' }; // > 4mb
+    const res = await request.post('/api/sterile-sets/s1/vision-count')
+      .set('Authorization', `Bearer ${tok(8)}`).send(tooBig);
+    expect(res.status).toBe(413);
+    expect(res.body.error.code).toBe('PAYLOAD_TOO_LARGE');
+    expect(mockSterileSetService.getSet).not.toHaveBeenCalled();
+    expect(mockAiService.countInstruments).not.toHaveBeenCalled();
+  });
+
+  it('getSet instruments:null dönerse (json_agg, hiç alet satırı yok) çökmez, countInstruments boş dizi ile çağrılır', async () => {
+    mockSterileSetService.getSet.mockResolvedValueOnce({ id:'s1', instruments:null });
+    mockAiService.countInstruments.mockResolvedValueOnce({ suggestions:[], parsed:true });
+    const res = await request.post('/api/sterile-sets/s1/vision-count')
+      .set('Authorization', `Bearer ${tok(8)}`).send({ imageBase64:'x', mediaType:'image/jpeg' });
+    expect(res.status).toBe(200);
+    expect(mockAiService.countInstruments).toHaveBeenCalledWith('x', 'image/jpeg', []);
+  });
+
+  it('Claude upstream hatası (Anthropic APIError, örn. 529 overloaded) 503 AI_UNAVAILABLE döner, recordVisionSuggestion çağrılmaz', async () => {
+    mockSterileSetService.getSet.mockResolvedValueOnce({ id:'s1', instruments:[] });
+    mockAiService.countInstruments.mockRejectedValueOnce(
+      new Anthropic.InternalServerError(529, { type:'error', error:{ type:'overloaded_error', message:'Overloaded' } }, undefined, new Headers()),
+    );
+    const res = await request.post('/api/sterile-sets/s1/vision-count')
+      .set('Authorization', `Bearer ${tok(8)}`).send({ imageBase64:'x', mediaType:'image/jpeg' });
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe('AI_UNAVAILABLE');
+    expect(res.body.error.message).not.toContain('Overloaded');
+    expect(mockSterileSetService.recordVisionSuggestion).not.toHaveBeenCalled();
+  });
+
+  it('Claude bağlantı hatası (APIConnectionError, status yok) da 503 AI_UNAVAILABLE döner', async () => {
+    mockSterileSetService.getSet.mockResolvedValueOnce({ id:'s1', instruments:[] });
+    mockAiService.countInstruments.mockRejectedValueOnce(new Anthropic.APIConnectionError({ message:'network down' }));
+    const res = await request.post('/api/sterile-sets/s1/vision-count')
+      .set('Authorization', `Bearer ${tok(8)}`).send({ imageBase64:'x', mediaType:'image/jpeg' });
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe('AI_UNAVAILABLE');
+  });
+
+  it('upstream OLMAYAN bir uygulama hatası hâlâ 500 INTERNAL_SERVER_ERROR yoluna düşer', async () => {
+    mockSterileSetService.getSet.mockResolvedValueOnce({ id:'s1', instruments:[] });
+    mockAiService.countInstruments.mockRejectedValueOnce(new TypeError('boom'));
+    const res = await request.post('/api/sterile-sets/s1/vision-count')
+      .set('Authorization', `Bearer ${tok(8)}`).send({ imageBase64:'x', mediaType:'image/jpeg' });
+    expect(res.status).toBe(500);
+    expect(res.body.error.code).toBe('INTERNAL_SERVER_ERROR');
+  });
+
+  // Limiter modül seviyesinde ve bu dosyadaki diğer testlerle paylaşılıyor — bu yüzden
+  // vision-count describe'ının SON testi olmalı.
+  it('dakikada 20 istekten sonra 429 TOO_MANY_REQUESTS döner (aiLimiter ile aynı değerler)', async () => {
+    let limited;
+    for (let i = 0; i < 21; i++) {
+      const res = await request.post('/api/sterile-sets/s1/vision-count')
+        .set('Authorization', `Bearer ${tok(8)}`).send({ imageBase64:'x', mediaType:'image/gif' }); // 400 — AI'ya hiç ulaşmaz
+      if (res.status === 429) { limited = res; break; }
+    }
+    expect(limited).toBeDefined();
+    expect(limited.body.error.code).toBe('TOO_MANY_REQUESTS');
   });
 });
 

@@ -14,3 +14,14 @@ test('001_init.sql defines vision_counting module, last_suggested_count column, 
     expect(sql).toContain(`10000000-0000-0000-0000-00000000000${n}`);
   }
 });
+
+test('001_init.sql seeds set_instruments idempotently (fixed ids + ON CONFLICT (id) DO NOTHING)', () => {
+  const sql = readFileSync('migrations/001_init.sql', 'utf8');
+  const match = sql.match(/INSERT INTO set_instruments \(id, set_id, name, expected_count\) VALUES([\s\S]*?);/);
+  expect(match).not.toBeNull();
+  const block = match[0];
+  expect(block).toMatch(/\)\s*ON CONFLICT \(id\) DO NOTHING;$/);
+  const ids = [...block.matchAll(/\('([0-9a-f-]{36})','10000000-/g)].map(m => m[1]);
+  expect(ids).toHaveLength(26);
+  expect(new Set(ids).size).toBe(26);
+});

@@ -83,15 +83,20 @@ describe('sterileSet.service — recordVisionSuggestion & addTrackingLog(counts)
     expect(queryMock).toHaveBeenCalledTimes(2);
     expect(queryMock).toHaveBeenNthCalledWith(
       1,
-      'UPDATE set_instruments SET last_suggested_count=$1 WHERE id=$2',
-      [3, 'i1']
+      'UPDATE set_instruments SET last_suggested_count=$1 WHERE id=$2 AND set_id=$3',
+      [3, 'i1', 'set-1']
     );
     expect(queryMock).toHaveBeenNthCalledWith(
       2,
-      'UPDATE set_instruments SET last_suggested_count=$1 WHERE id=$2',
-      [5, 'i3']
+      'UPDATE set_instruments SET last_suggested_count=$1 WHERE id=$2 AND set_id=$3',
+      [5, 'i3', 'set-1']
     );
     expect(queryMock.mock.calls.some(([, params]) => params.includes('i2'))).toBe(false);
+    // Isolation: UPDATE hem id hem set_id ile filtreler (caller'a güvenmek yerine fonksiyonun kendisi zorlar)
+    for (const [sql] of queryMock.mock.calls) {
+      expect(sql).toContain('WHERE id=$2');
+      expect(sql).toContain('AND set_id=$3');
+    }
 
     // audit() tam olarak bir kez, doğru action/resource/newData ile
     expect(auditMock).toHaveBeenCalledTimes(1);
@@ -109,8 +114,8 @@ describe('sterileSet.service — recordVisionSuggestion & addTrackingLog(counts)
 
   it("addTrackingLog: counts verilirse ilgili set_instruments.current_count güncellenir", async () => {
     setupFakeDb(async (sql, params) => {
-      if (/SELECT id, expected_count FROM set_instruments/.test(sql)) {
-        return { rows: [{ id: 'i1', expected_count: 1 }] };
+      if (/SELECT id, name, expected_count FROM set_instruments/.test(sql)) {
+        return { rows: [{ id: 'i1', name: 'Trokar 10mm', expected_count: 1 }] };
       }
       if (/UPDATE set_instruments SET current_count/.test(sql)) {
         return { rowCount: 1, rows: [] };
@@ -151,8 +156,8 @@ describe('sterileSet.service — recordVisionSuggestion & addTrackingLog(counts)
 
   it('addTrackingLog: count beklenenden azsa notes alanına eksik-alet uyarısı eklenir, AMA stage geçişi/status update ENGELLENMEZ', async () => {
     setupFakeDb(async (sql, params) => {
-      if (/SELECT id, expected_count FROM set_instruments/.test(sql)) {
-        return { rows: [{ id: 'i1', expected_count: 2 }] };
+      if (/SELECT id, name, expected_count FROM set_instruments/.test(sql)) {
+        return { rows: [{ id: 'i1', name: 'Trokar 5mm', expected_count: 2 }] };
       }
       if (/UPDATE set_instruments SET current_count/.test(sql)) {
         return { rowCount: 1, rows: [] };
@@ -181,8 +186,10 @@ describe('sterileSet.service — recordVisionSuggestion & addTrackingLog(counts)
     // notes '⚠' uyarısını içermeli (eksik alet uyarısı eklenmiş)
     const insertCall = queryMock.mock.calls.find(([sql]) => /INSERT INTO set_tracking_logs/.test(sql));
     expect(insertCall).toBeDefined();
-    expect(insertCall[1]).toEqual(['set-1', 'depo', 'op1', '⚠ Eksik alet: i1']);
+    expect(insertCall[1]).toEqual(['set-1', 'depo', 'op1', '⚠ Eksik alet: Trokar 5mm']);
     expect(insertCall[1][3]).toContain('⚠');
+    // not alanı instrument UUID'sini değil, aletin ADINI içermeli
+    expect(insertCall[1][3]).not.toContain('i1');
 
     // statusMap'e göre sterile_sets UPDATE'i HÂLÂ çalışmalı (depo -> STERILE), engellenmemeli
     const statusCalls = queryMock.mock.calls.filter(([sql]) => /UPDATE sterile_sets SET status/.test(sql));
@@ -193,8 +200,8 @@ describe('sterileSet.service — recordVisionSuggestion & addTrackingLog(counts)
   it("addTrackingLog: counts içindeki instrumentId başka bir sete aitse (set_id eşleşmiyor) o satır güncellenmez", async () => {
     // i-foreign gerçekte 'set-B'ye ait; set-A için SELECT sonucunda hiç görünmez.
     setupFakeDb(async (sql, params) => {
-      if (/SELECT id, expected_count FROM set_instruments/.test(sql)) {
-        return { rows: [{ id: 'i-other', expected_count: 5 }] }; // i-foreign burada YOK
+      if (/SELECT id, name, expected_count FROM set_instruments/.test(sql)) {
+        return { rows: [{ id: 'i-other', name: 'Grasper', expected_count: 5 }] }; // i-foreign burada YOK
       }
       if (/UPDATE set_instruments SET current_count/.test(sql)) {
         const [, instrumentId, setIdParam] = params;

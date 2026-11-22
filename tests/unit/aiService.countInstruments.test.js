@@ -72,6 +72,46 @@ describe('ai.service — countInstruments (gerçek client.messages.create, requi
     expect(result).toEqual({ suggestions: [], parsed: false });
   });
 
+  it('```json bloğu VAR ama içindeki JSON bozuksa fırlatmaz, parsed:false + boş suggestions döner', async () => {
+    const createMock = vi.fn().mockResolvedValue({
+      content: [{ type: 'text', text: '```json\n{"counts":[{"name":"A","detectedCount":\n```' }],
+    });
+    const { countInstruments } = requireFreshService(createMock);
+    const result = await countInstruments('x', 'image/jpeg', [{ instrumentId: 'i1', name: 'A', expectedCount: 1 }]);
+    expect(result).toEqual({ suggestions: [], parsed: false });
+  });
+
+  it('geçersiz detectedCount değerleri (negatif, string, ondalıklı, SMALLINT dışı, eksik) null olur', async () => {
+    const createMock = vi.fn().mockResolvedValue({
+      content: [{ type: 'text', text: '```json\n{"counts":[' +
+        '{"name":"A","detectedCount":-1},' +
+        '{"name":"B","detectedCount":"3"},' +
+        '{"name":"C","detectedCount":1.5},' +
+        '{"name":"D","detectedCount":40000},' +
+        '{"name":"E"},' +
+        '{"name":"F","detectedCount":32767}' +
+        ']}\n```' }],
+    });
+    const { countInstruments } = requireFreshService(createMock);
+    const result = await countInstruments('x', 'image/jpeg', ['A', 'B', 'C', 'D', 'E', 'F'].map((name, i) => (
+      { instrumentId: `i${i}`, name, expectedCount: 1 }
+    )));
+    expect(result.parsed).toBe(true);
+    expect(result.suggestions.map(s => s.detectedCount)).toEqual([null, null, null, null, null, 32767]);
+  });
+
+  it('CRLF satır sonları ve ```json etiketinden sonra boşluk tolere edilir', async () => {
+    const createMock = vi.fn().mockResolvedValue({
+      content: [{ type: 'text', text: '```json \r\n{"counts":[{"name":"A","detectedCount":2}]}\r\n```' }],
+    });
+    const { countInstruments } = requireFreshService(createMock);
+    const result = await countInstruments('x', 'image/jpeg', [{ instrumentId: 'i1', name: 'A', expectedCount: 2 }]);
+    expect(result).toEqual({
+      suggestions: [{ instrumentId: 'i1', name: 'A', expectedCount: 2, detectedCount: 2 }],
+      parsed: true,
+    });
+  });
+
   it('expectedInstruments boşsa çökmez, boş suggestions döner', async () => {
     const createMock = vi.fn().mockResolvedValue({ content: [{ type: 'text', text: '```json\n{"counts":[]}\n```' }] });
     const { countInstruments } = requireFreshService(createMock);

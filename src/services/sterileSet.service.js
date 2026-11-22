@@ -132,10 +132,10 @@ async function _addTrackingLogCore(runner, { setId, stage, operator, notes, coun
 
   if (counts !== undefined) {
     const { rows: expectedRows } = await runner.query(
-      'SELECT id, expected_count FROM set_instruments WHERE set_id=$1',
+      'SELECT id, name, expected_count FROM set_instruments WHERE set_id=$1',
       [setId]
     );
-    const expectedMap = new Map(expectedRows.map(r => [r.id, r.expected_count]));
+    const expectedMap = new Map(expectedRows.map(r => [r.id, { expected_count: r.expected_count, name: r.name }]));
 
     const missing = [];
     for (const c of counts) {
@@ -147,8 +147,8 @@ async function _addTrackingLogCore(runner, { setId, stage, operator, notes, coun
       );
 
       const expected = expectedMap.get(c.instrumentId);
-      if (expected != null && c.count < expected) {
-        missing.push(c.instrumentId);
+      if (expected != null && c.count < expected.expected_count) {
+        missing.push(expected.name);
       }
     }
 
@@ -198,8 +198,8 @@ async function recordVisionSuggestion({ setId, suggestions, userId, req }) {
 
   for (const s of toUpdate) {
     await db.query(
-      'UPDATE set_instruments SET last_suggested_count=$1 WHERE id=$2',
-      [s.detectedCount, s.instrumentId]
+      'UPDATE set_instruments SET last_suggested_count=$1 WHERE id=$2 AND set_id=$3',
+      [s.detectedCount, s.instrumentId, setId]
     );
   }
 
