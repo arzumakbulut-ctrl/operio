@@ -112,7 +112,7 @@ test('001_init.sql defines kiosk/voice/spotify tables', () => {
 
 **Interfaces:**
 - Consumes: Plan 1'in `module.service.js`'teki `hasActiveModule(institutionId, slug)`.
-- Produces: `signKioskToken({ institutionId, roomId, jti }): string`, `verifyKioskToken(token): { institutionId, roomId, jti }` (throws on invalid/expired). `kioskRoomAuth(req, res, next)` — `Authorization: Bearer <kioskToken>` okur, `verifyKioskToken` ile doğrular, `kiosk_tokens`'ta `jti` için `revoked_at IS NULL` kontrolü yapar, URL'deki `:roomId` ile token'ın `roomId`'si eşleşmiyorsa 403, ardından `hasActiveModule(institutionId, 'voice_control')` kontrolü yapar (yoksa 403 `{code:'module_not_purchased'}` — spesifikasyonun "`requireModule('voice_control')`" şartı, kişisel JWT olmadığı için mevcut `requireModule` middleware'i değil, bu fonksiyon doğrudan çağrılarak uygulanır), sonra o oda için `IN_PROGRESS` ameliyat sorgular — yoksa 409 (`{code:'no_active_surgery'}`) döner, varsa `req.kiosk = { institutionId, roomId }` ve `req.activeSurgery = { id, surgeryTeams: [...] }` atar ve `next()` çağırır. Sonraki tüm kiosk route'ları bu middleware'i kullanır.
+- Produces: `signKioskToken({ institutionId, roomId, jti }): string`, `verifyKioskToken(token): { institutionId, roomId, jti }` (throws on invalid/expired). `kioskRoomAuth(req, res, next)` — `Authorization: Bearer <kioskToken>` okur, `verifyKioskToken` ile doğrular, `kiosk_tokens`'ta `jti` için `revoked_at IS NULL` kontrolü yapar, URL'deki `:roomId` ile token'ın `roomId`'si eşleşmiyorsa 403, ardından `hasActiveModule(institutionId, 'voice_control')` kontrolü yapar (yoksa 403 `{code:'module_not_purchased'}` — spesifikasyonun "`requireModule('voice_control')`" şartı, kişisel JWT olmadığı için mevcut `requireModule` middleware'i değil, bu fonksiyon doğrudan çağrılarak uygulanır), sonra o oda için `IN_PROGRESS` ameliyat sorgular — yoksa 409 (`{code:'no_active_surgery'}`) döner, varsa `req.kiosk = { institutionId, roomId }` ve `req.activeSurgery = { id, surgeryTeams: [{ userId, fullName, roleId, teamRole }] }` atar ve `next()` çağırır (`surgery_teams` ile `users` JOIN edilir — `role_id` ve `full_name` buradan gelir, ikisi de aşağıdaki Task 4'ün ret mesajları ve Task 7'nin `authorize` eşdeğeri rol kontrolü için gerekli). Sonraki tüm kiosk route'ları bu middleware'i kullanır.
 
 - [ ] **Step 1: `tests/unit/kioskJwt.test.js` — sign/verify round-trip ve geçersiz token testleri yaz**
 
@@ -168,7 +168,7 @@ test('throws on a tampered token', () => {
 
 **Interfaces:**
 - Consumes: Task 2'nin `kioskRoomAuth` (bu middleware ondan sonra zincirlenir, `req.activeSurgery.surgeryTeams` kullanır), Task 3'ün `getMockConfig`.
-- Produces: `SpeakerVerifier.identify(audioBuffer, candidateUserIds): Promise<{userId, confidence} | null>` (abstract), `MockSpeakerVerifier` bu arayüzü `mode`'a göre uygular. `kioskSpeakerAuth(req, res, next)` — `req.activeSurgery.surgeryTeams`'ten `candidateUserIds` çıkarır, `identify()` çağırır: sonuç `null` → 403 `{code:'unrecognized', message:'Sizi tanıyamadım...'}`; sonuç dolu ama `userId` o ekipte değil → 403 `{code:'not_in_team', message:'{isim}, bu ameliyatta görevli değilsiniz, komut veremezsiniz'}`; ekipteyse `req.speaker = { userId, fullName, teamRole }` ile `next()`.
+- Produces: `SpeakerVerifier.identify(audioBuffer, candidateUserIds): Promise<{userId, confidence} | null>` (abstract), `MockSpeakerVerifier` bu arayüzü `mode`'a göre uygular. `kioskSpeakerAuth(req, res, next)` — `req.activeSurgery.surgeryTeams`'ten `candidateUserIds` çıkarır, `identify()` çağırır: sonuç `null` → 403 `{code:'unrecognized', message:'Sizi tanıyamadım...'}`; sonuç dolu ama `userId` o ekipte değil → 403 `{code:'not_in_team', message:'{isim}, bu ameliyatta görevli değilsiniz, komut veremezsiniz'}`; ekipteyse eşleşen candidate'in `req.activeSurgery.surgeryTeams`'teki tam kaydından `req.speaker = { userId, fullName, roleId, teamRole }` ile `next()` (hiçbir ek sorgu gerekmez — bu alanlar zaten Task 2'nin JOIN'inden `req.activeSurgery.surgeryTeams`'te mevcuttur).
 
 - [ ] **Step 1: `tests/unit/mockSpeakerVerifier.test.js` yaz** — `mode='always_match'` → ilk candidate'i döner; `mode='always_reject_team'` → candidate listesinde OLMAYAN bir `userId` döner (ekip-dışı reddi simüle etmek için); `mode='always_unrecognized'` → `null` döner; `mode='cycle'` → ardışık çağrılarda `cycle_index`'e göre farklı candidate döner ve index'i artırır.
 - [ ] **Step 2: Testleri çalıştır, fail ettiklerini doğrula**
@@ -241,7 +241,7 @@ test('throws on a tampered token', () => {
 - Test: `tests/unit/kioskConfirmation.test.js`, `tests/integration/kioskVoiceCommand.device.test.js`
 
 **Interfaces:**
-- Consumes: Task 4'ün `kioskSpeakerAuth` (`req.speaker`), Plan 1'in `deviceService.listDevices({roomId, deviceGroup})`/`decideCommand`/`executeCommand`.
+- Consumes: Task 4'ün `kioskSpeakerAuth` (`req.speaker = {userId, fullName, roleId, teamRole}`), Plan 1'in `deviceService.listDevices({institutionId, roomId})` (NOT `deviceGroup` filtresi — client/route tarafında filtrelenir) ve `executeCommand({deviceId, institutionId, userId, roleId, action, value, req})`.
 - Produces: `createPendingConfirmation(roomId, payload): { phrase }` (3 rastgele rakam, `-` ile, bellekte `Map<roomId, {phrase, payload, expiresAt}>`, 10sn TTL), `resolvePendingConfirmation(roomId, saidPhrase): payload | null` (eşleşmiyor/süresi geçmiş → `null`, eşleşiyor → entry silinir + `payload` döner — Review Focus #2: `payload`'ın `surgeryId`'si çağıran tarafından hâlâ `IN_PROGRESS` mi diye TEKRAR kontrol edilir, resolvePendingConfirmation'ın kendisi DB'ye bakmaz, bu kontrol route'ta yapılır).
 
 - [ ] **Step 1: `tests/unit/kioskConfirmation.test.js` yaz** — oluşturulan phrase'in `\d-\d-\d` formatında olduğu; doğru phrase ile `resolvePendingConfirmation` payload'ı döndürüp entry'yi sildiği (ikinci çağrıda `null`); yanlış phrase ile `null` döndüğü; `expiresAt` geçmişse (zaman mocklanarak) doğru phrase bile olsa `null` döndüğü (Review Focus #2'nin alt parçası).
@@ -250,7 +250,7 @@ test('throws on a tampered token', () => {
 - [ ] **Step 4: Testleri çalıştır, geçtiklerini doğrula**
 - [ ] **Step 5: `tests/integration/kioskVoiceCommand.device.test.js` yaz** — (a) ilk çağrı (DEVICE_COMMAND transcript, `confirmationPhrase` yok) → `kioskSpeakerAuth` geçer → 200 + `{status:'pending_confirmation', phrase}`; (b) ikinci çağrı aynı `roomId` + doğru `confirmationPhrase` + aynı transcript → `deviceService.decideCommand`/`executeCommand`'ın (mock `_registry` ile) doğru parametrelerle çağrıldığı ve 200 sonuç döndüğü; (c) ikinci çağrıda ameliyat artık `IN_PROGRESS` değilse (mock `kioskRoomAuth` zaten üst katmanda 409 döner — bu zaten Task 2'nin kapsamında, burada ayrıca test edilmez) — bunun yerine burada test edilen: ikinci çağrıda YANLIŞ `confirmationPhrase` → 400 `{code:'confirmation_mismatch'}`.
 - [ ] **Step 6: Testleri çalıştır, fail ettiklerini doğrula**
-- [ ] **Step 7: `src/routes/kiosk.routes.js`'in DEVICE_COMMAND dalını implemente et** — `params`'taki cihaz-grubu anahtar kelimesini `deviceService.listDevices({roomId: req.kiosk.roomId, deviceGroup})` ile eşleştirir (birden fazla eşleşirse ilkini alır — builder notu), `confirmationPhrase` yoksa `createPendingConfirmation` ile phrase üretip döner; varsa `resolvePendingConfirmation` ile payload'ı çözüp `deviceService.decideCommand`/`executeCommand`'ı `req.speaker.userId`/`req.speaker.teamRole`'den türetilen `roleId` ile çağırır.
+- [ ] **Step 7: `src/routes/kiosk.routes.js`'in DEVICE_COMMAND dalını implemente et** — gerçek `deviceService.listDevices({ institutionId, roomId })` imzası bir `deviceGroup` filtresi ALMAZ (sadece kurum+oda filtreler) — bu yüzden `listDevices({ institutionId: req.kiosk.institutionId, roomId: req.kiosk.roomId })` çağrılıp dönen listeden `params`'taki cihaz-grubu anahtar kelimesiyle eşleşen `device_group`'a sahip ilk cihaz route handler'ında seçilir (birden fazla eşleşirse ilkini alır — builder notu). `confirmationPhrase` yoksa `createPendingConfirmation` ile phrase üretip döner; varsa `resolvePendingConfirmation` ile payload'ı çözüp `deviceService.executeCommand({ deviceId, institutionId: req.kiosk.institutionId, userId: req.speaker.userId, roleId: req.speaker.roleId, action, value, req })` çağırır — `executeCommand` kendi içinde `getActiveAssignment` ile oda/ekip rolünü zaten yeniden doğrular (bkz. `device.service.js:216`), bu route'ta `teamRole` ayrıca geçirilmez/kontrol edilmez.
 - [ ] **Step 8: Testleri çalıştır, geçtiklerini doğrula**
 - [ ] **Step 9: Commit**
 
@@ -330,6 +330,25 @@ test('throws on a tampered token', () => {
 
 ---
 
+### Task 10b: Kiosk durum endpoint'i (planlama hatası, yürütme sırasında bulundu)
+
+**Not:** Bu task orijinal plana dahil değildi — Task 15'in `Kiosk.jsx`/hook tasarımı, odada aktif ameliyat olup olmadığını **proaktif olarak** (kullanıcı "Operio" demeden, sayfa açılışında) sorgulayabileceği bir uç nokta varsayıyordu, ama hiçbir task bunu oluşturmadı — ne orijinal (2026-11-20) tasarım dokümanının Socket.io önerisi uygulanabilir (kiosk'ta kişisel JWT yok, `src/socket.js`'in JWT middleware'i bunu reddeder), ne de böyle bir REST endpoint planlandı. Task 2'nin `kioskRoomAuth` middleware'i zaten tam olarak bu kontrolü yapıyor (aktif ameliyat yoksa 409 döner) — eksik olan sadece onu tek başına çağırabilecek bir route.
+
+**Files:**
+- Modify: `src/routes/kiosk.routes.js` (yeni bir `GET` route eklenir, mevcut `POST /voice-command` route'una dokunulmaz)
+- Test: `tests/integration/kioskStatus.test.js`
+
+**Interfaces:**
+- Produces: `GET /api/kiosk/rooms/:roomId/status` — sadece `kioskRoomAuth` middleware'inden geçer (başka hiçbir ek mantık yok): geçerse `ok(res, { active: true, surgeryId: req.activeSurgery.id })`; `kioskRoomAuth` zaten 401/403/409'ları kendi başına döner (token yok/geçersiz/oda uyuşmazlığı/modül satın alınmamış/aktif ameliyat yok).
+
+- [ ] **Step 1: `tests/integration/kioskStatus.test.js` yaz** — gerçek `kioskRoomAuth`'tan geçen bir supertest isteğiyle (mock `kiosk`/`module` servisleri `_registry` üzerinden, Task 2/3'teki desenin aynısı): (a) aktif ameliyat varsa → 200 `{active:true, surgeryId}`; (b) aktif ameliyat yoksa → 409 (zaten `kioskRoomAuth`'un kendi davranışı, burada sadece route'un bunu bozmadığı doğrulanıyor).
+- [ ] **Step 2: Testi çalıştır, fail ettiğini doğrula**
+- [ ] **Step 3: Route'u ekle** — tek satır: `router.get('/rooms/:roomId/status', kioskRoomAuth, (req, res) => ok(res, { active: true, surgeryId: req.activeSurgery.id }));`
+- [ ] **Step 4: Testi çalıştır, geçtiğini doğrula**
+- [ ] **Step 5: Commit**
+
+---
+
 ## Frontend (`operio-react/operio`)
 
 ### Task 11: `api.js` eklemeleri
@@ -339,11 +358,12 @@ test('throws on a tampered token', () => {
 - Test: `tests/unit/api.kiosk.test.js`
 
 **Interfaces:**
-- Produces: `kioskAPI = { voiceCommand(roomId, {transcript, audio, confirmationPhrase}), status(roomId) }` (kiosk token header'ıyla, kişisel JWT interceptor'ından AYRI bir axios instance veya header override — mevcut `api.js`'teki kişisel-JWT interceptor kiosk isteklerine karışmamalı), `voiceProfileAPI = { enroll(audioBase64), get() }`, `spotifyAPI = { connect(), disconnect() }`, `kioskAdminAPI = { createToken(roomId), revokeToken(roomId), getMockConfig(), setMockConfig(mode) }`.
+- **Düzeltme (planlama hatası, yürütme sırasında bulundu):** `api.js` axios DEĞİL, `fetch`'e dayalı özel bir `request(method, path, body, retry)` fonksiyonu kullanıyor (kişisel JWT'yi `_accessToken` modül-seviyesi değişkeninden okuyup header'a ekliyor, 401'de refresh deniyor). `kioskAPI` bu fonksiyonu KULLANAMAZ (kiosk'ta kişisel JWT yok, 401-refresh mantığı kiosk'un 401/403/409'larıyla hiç ilgili değil) — bunun yerine ayrı, basit bir `kioskRequest(method, path, kioskToken, body)` fonksiyonu eklenir: `fetch`'i doğrudan çağırır, `Authorization: Bearer <kioskToken>` header'ını parametre olarak verilen token'dan oluşturur, retry/refresh mantığı YOK.
+- Produces: `kioskAPI = { voiceCommand(roomId, kioskToken, {transcript, audio, confirmationPhrase}), status(roomId, kioskToken) }` (ikisi de `kioskRequest` üzerinden; `status`, Task 10b'nin `GET /kiosk/rooms/:roomId/status` endpoint'ini çağırır), `voiceProfileAPI = { enroll(audioBase64), get() }` (bunlar normal `request()`/kişisel JWT kullanır — Profil sayfasından, oturum açmış kullanıcı çağırır), `spotifyAPI = { connect(), disconnect() }` (aynı şekilde normal `request()`), `kioskAdminAPI = { createToken(roomId), revokeToken(roomId), getMockConfig(), setMockConfig(mode) }` (aynı şekilde normal `request()` — admin kendi kişisel oturumuyla çağırır).
 
-- [ ] **Step 1: `tests/unit/api.kiosk.test.js` yaz** — `kioskAPI.voiceCommand`'ın isteğe kişisel JWT'yi DEĞİL, parametre olarak verilen kiosk token'ı `Authorization` header'ına koyduğunu (mock `axios`/`fetch` üzerinden) doğrula — bu, Kiosk.jsx'in kişisel oturumsuz çalışabilmesi için kritik bir ayrım.
+- [ ] **Step 1: `tests/unit/api.kiosk.test.js` yaz** — `global.fetch`'i mocklayarak: `kioskAPI.voiceCommand(roomId, kioskToken, {...})` çağrıldığında `fetch`'e giden isteğin `Authorization` header'ının parametre olarak verilen `kioskToken`'ı taşıdığını (global `_accessToken`'ı DEĞİL) doğrula — bu, Kiosk.jsx'in kişisel oturumsuz çalışabilmesi için kritik bir ayrım. Ayrıca `kioskAPI.status(roomId, kioskToken)`'ın doğru path'e (`/kiosk/rooms/:roomId/status`) GET attığını doğrula.
 - [ ] **Step 2: Testi çalıştır, fail ettiğini doğrula**
-- [ ] **Step 3: `api.js`'e dört nesneyi ekle** — `kioskAPI` için ayrı bir axios instance (`kioskClient`, kişisel interceptor'suz, token her çağrıda parametre olarak alınır).
+- [ ] **Step 3: `api.js`'e dört nesneyi ekle** — `kioskRequest` yardımcı fonksiyonu + `kioskAPI` (onu kullanır), `voiceProfileAPI`/`spotifyAPI`/`kioskAdminAPI` (mevcut `get`/`post` kısayollarını kullanır, aynı diğer API nesneleri gibi).
 - [ ] **Step 4: Testi çalıştır, geçtiğini doğrula**
 - [ ] **Step 5: Commit**
 
@@ -414,7 +434,7 @@ test('throws on a tampered token', () => {
 - Consumes: Task 11'in `kioskAPI`.
 - Produces: `useVoiceDeviceControl(roomId, kioskToken)` → `{ state: 'idle'|'listening'|'awaiting_confirmation'|'executing'|'no_surgery', lastResponse, pendingPhrase }` + dahili olarak `SpeechRecognition` (uyandırma kelimesi "operio" + komut metni) ve `MediaRecorder` (ring buffer) paralel çalışır; komut algılanınca `kioskAPI.voiceCommand(roomId, {transcript, audio})` çağrılır; yanıt `pending_confirmation` ise `state='awaiting_confirmation'` olur ve `speechSynthesis` ile `"Onaylamak için {phrase} deyin"` okunur, kullanıcı phrase'i tekrarlayınca `confirmationPhrase` ile ikinci çağrı yapılır; her yanıttaki `say`/mesaj alanı `speechSynthesis.speak()` ile okunur. `Kiosk.jsx` bu hook'u mount eder, `state==='no_surgery'` ise "Bu odada aktif ameliyat yok, sesli kontrol kapalı" gösterir.
 
-- [ ] **Step 1: `tests/unit/useVoiceDeviceControl.test.js` yaz** — `SpeechRecognition`/`MediaRecorder`/`speechSynthesis` global'lerini mocklayarak: (a) hook mount olduğunda `kioskAPI.status(roomId)` (mock) `no_active_surgery` dönerse `state==='no_surgery'`; (b) bir komut simüle edilip `kioskAPI.voiceCommand` `pending_confirmation` dönerse `state==='awaiting_confirmation'` ve `pendingPhrase` dolu olur; (c) phrase tekrarı simüle edilip ikinci `voiceCommand` çağrısının `confirmationPhrase` içerdiği.
+- [ ] **Step 1: `tests/unit/useVoiceDeviceControl.test.js` yaz** — `SpeechRecognition`/`MediaRecorder`/`speechSynthesis` global'lerini mocklayarak: (a) hook mount olduğunda `kioskAPI.status(roomId, kioskToken)` (mock) 409/`no_active_surgery` ile reddederse `state==='no_surgery'`; (b) bir komut simüle edilip `kioskAPI.voiceCommand` `pending_confirmation` dönerse `state==='awaiting_confirmation'` ve `pendingPhrase` dolu olur; (c) phrase tekrarı simüle edilip ikinci `voiceCommand` çağrısının `confirmationPhrase` içerdiği.
 - [ ] **Step 2: Testleri çalıştır, fail ettiklerini doğrula**
 - [ ] **Step 3: Hook'u implemente et.**
 - [ ] **Step 4: Testleri çalıştır, geçtiklerini doğrula**
