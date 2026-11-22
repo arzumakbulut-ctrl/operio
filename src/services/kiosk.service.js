@@ -21,6 +21,11 @@ async function isTokenRevoked(jti) {
  * birlikte getirir. surgery_teams + users JOIN edilerek her ekip üyesi için
  * full_name ve role_id tek sorguda alınır (device.service.js'teki
  * getActiveAssignment ile aynı JOIN deseni).
+ *
+ * surgeryTeams sırası DETERMİNİSTİKTİR: önce team_role = 'cerrah' olan(lar), sonra
+ * user_id'ye göre artan. MockSpeakerVerifier'ın 'always_match' modu ilk adayı,
+ * 'cycle' modu bu sırayla dönüşü kullandığından, ORDER BY olmadan (DB'ye bağlı keyfi
+ * sıra) cerrah-yetkili komutların demo davranışı çalıştırmadan çalıştırmaya değişirdi.
  * @returns {Promise<{ id, surgeryTeams: Array<{ userId, fullName, roleId, teamRole }> } | null>}
  */
 async function getActiveSurgeryForRoom(roomId) {
@@ -29,7 +34,8 @@ async function getActiveSurgeryForRoom(roomId) {
      FROM surgery_teams st
      JOIN surgeries s ON s.id = st.surgery_id
      JOIN users u ON u.id = st.user_id
-     WHERE s.room_id = $1 AND s.status = 'IN_PROGRESS'`,
+     WHERE s.room_id = $1 AND s.status = 'IN_PROGRESS'
+     ORDER BY (st.team_role = 'cerrah') DESC, st.user_id ASC`,
     [roomId]
   );
 
