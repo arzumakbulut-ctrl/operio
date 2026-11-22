@@ -68,6 +68,27 @@ describe('Profil — Ses Profili bölümü', () => {
     expect(screen.queryByRole('button', { name: /^kayda başla$/i })).not.toBeInTheDocument();
   });
 
+  it('final review Finding 4: "Yeniden Kaydet" dalında da sabit pasaj metni ve "3 kez" okuma talimatı gösterilir (önceden hiç gösterilmiyordu)', async () => {
+    const { voiceProfileAPI } = await import('../../src/services/api.js');
+    voiceProfileAPI.get.mockResolvedValueOnce({ modelVersion: 'v1', enrolledAt: '2026-11-20T10:00:00Z' });
+
+    render(<Profil />);
+
+    expect(await screen.findByRole('button', { name: /yeniden kaydet/i })).toBeInTheDocument();
+    expect(screen.getByText(/Operio ses profilimi oluşturuyorum, bu cümleyi kendi doğal konuşma hızımla okuyorum\./i)).toBeInTheDocument();
+    expect(screen.getByText(/3 kez/i)).toBeInTheDocument();
+  });
+
+  it('final review Finding 4: "Kayda Başla" dalındaki talimat metni artık pasajın 1 kez değil 3 KEZ okunacağını belirtir', async () => {
+    const { voiceProfileAPI } = await import('../../src/services/api.js');
+    voiceProfileAPI.get.mockResolvedValueOnce(null);
+
+    render(<Profil />);
+
+    expect(await screen.findByRole('button', { name: /kayda başla/i })).toBeInTheDocument();
+    expect(screen.getByText(/3 kez/i)).toBeInTheDocument();
+  });
+
   it('"Kayda Başla" tıklanınca 3 ardışık kayıt yapar ve tek bir enroll çağrısında 3 elemanlı dizi gönderir', async () => {
     const { voiceProfileAPI } = await import('../../src/services/api.js');
     voiceProfileAPI.get.mockResolvedValueOnce(null);
@@ -112,6 +133,67 @@ describe('Profil — Ses Profili bölümü', () => {
     recorderInstances[1].stop();
 
     await waitFor(() => expect(recorderInstances.length).toBe(3));
+    recorderInstances[2].stop();
+
+    await waitFor(() => expect(voiceProfileAPI.enroll).toHaveBeenCalledTimes(1));
+  });
+
+  it('final review Finding 5: getUserMedia noiseSuppression ve echoCancellation ile çağrılır (kiosk\'un doğrulama yakalamasıyla tutarlı)', async () => {
+    const { voiceProfileAPI } = await import('../../src/services/api.js');
+    voiceProfileAPI.get.mockResolvedValueOnce(null);
+
+    const { recorderInstances, getUserMedia } = mockMediaKayit();
+
+    render(<Profil />);
+    fireEvent.click(await screen.findByRole('button', { name: /kayda başla/i }));
+
+    await waitFor(() => expect(recorderInstances.length).toBe(1));
+    const [constraints] = getUserMedia.mock.calls[0];
+    expect(constraints.audio.noiseSuppression).toBe(true);
+    expect(constraints.audio.echoCancellation).toBe(true);
+
+    recorderInstances[0].stop();
+    await waitFor(() => expect(recorderInstances.length).toBe(2));
+    recorderInstances[1].stop();
+    await waitFor(() => expect(recorderInstances.length).toBe(3));
+    recorderInstances[2].stop();
+    await waitFor(() => expect(voiceProfileAPI.enroll).toHaveBeenCalledTimes(1));
+  });
+
+  it('final review Finding 4: kayıtlar arasında "tekrar okuyun" ipucu gösterilir ve bir sonraki kayıt duraklama bitmeden BAŞLAMAZ', async () => {
+    // Bu test GERÇEK zamanlayıcılarla çalışır (kısa KAYIT_ARASI_BEKLEME_MS=500ms
+    // üretim gecikmesi gerçekten geçer) — fake timers + testing-library DOM
+    // polling'inin (screen.getByText + waitFor) birbiriyle çakışmasından
+    // kaçınmak için; 500ms, testing-library'nin varsayılan waitFor zaman
+    // aşımından (1000ms) kısa olduğu için akış hızlı ve deterministik kalır.
+    const { voiceProfileAPI } = await import('../../src/services/api.js');
+    voiceProfileAPI.get.mockResolvedValueOnce(null);
+
+    const { recorderInstances } = mockMediaKayit();
+
+    render(<Profil />);
+    const btn = await screen.findByRole('button', { name: /kayda başla/i });
+    fireEvent.click(btn);
+
+    await waitFor(() => expect(recorderInstances.length).toBe(1));
+    recorderInstances[0].stop();
+
+    // 1. kayıt bitti: 2. kayıt başlamadan önce "tekrar okuyun" ipucu gösterilmeli
+    // VE henüz 2. kayıt (yeni MediaRecorder örneği) başlamamış olmalı. Not: metin
+    // "Hazır olun, ..." hem duraklama ipucu div'inde HEM DE (farklı sözcüklerle)
+    // buton metninde "tekrar okuyun" geçtiği için /tekrar okuyun/i regex'i İKİ
+    // elementle eşleşip getByText'i "multiple elements" ile patlatır — bu yüzden
+    // SADECE ipucu div'ine özgü "Hazır olun" ifadesini arıyoruz.
+    await waitFor(() => expect(screen.getByText(/hazır olun/i)).toBeInTheDocument(), { timeout: 3000 });
+    expect(recorderInstances.length).toBe(1);
+
+    await waitFor(() => expect(recorderInstances.length).toBe(2), { timeout: 3000 });
+    expect(screen.queryByText(/hazır olun/i)).not.toBeInTheDocument();
+    recorderInstances[1].stop();
+
+    await waitFor(() => expect(screen.getByText(/hazır olun/i)).toBeInTheDocument(), { timeout: 3000 });
+    expect(recorderInstances.length).toBe(2);
+    await waitFor(() => expect(recorderInstances.length).toBe(3), { timeout: 3000 });
     recorderInstances[2].stop();
 
     await waitFor(() => expect(voiceProfileAPI.enroll).toHaveBeenCalledTimes(1));
