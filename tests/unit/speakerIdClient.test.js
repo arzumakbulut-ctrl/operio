@@ -23,4 +23,14 @@ describe('speakerIdClient.getEmbedding', () => {
     const { getEmbedding } = require('../../src/services/speakerIdClient');
     expect(await getEmbedding('base64data')).toBeNull();
   });
+
+  it('non-2xx yanıtta null döner', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({ voice_detected: true, embedding: [0.1, 0.2, 0.3] }),
+    });
+    const { getEmbedding } = require('../../src/services/speakerIdClient');
+    expect(await getEmbedding('base64data')).toBeNull();
+  });
 });
