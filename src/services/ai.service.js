@@ -209,4 +209,36 @@ async function chat({ messages, user, systemOverride }) {
   return response.content[0]?.text || '';
 }
 
-module.exports = { streamChat, chat, buildContext };
+// ── WEB ARAMA (Operia kiosk WEB_SEARCH) ───────────────────────
+/**
+ * webSearch — Claude'un yerleşik `web_search` aracıyla gerçek bir web araması
+ * yaptırır ve modelin ürettiği metni (özetlenmiş yanıtı) döner.
+ *
+ * `client.messages.create` yanıtının `content` dizisi, modelin arama yaparken
+ * ürettiği birden fazla blok TÜRÜNÜ İÇERİR (server_tool_use, web_search_tool_result,
+ * text — bu sırayla, birden fazla arama turu olursa tekrarlı/iç içe olabilir).
+ * Yalnızca `type === 'text'` olan bloklar kullanıcıya gösterilecek metindir; bu
+ * fonksiyon SADECE onları, göründükleri sırada birleştirip döner — ham arama
+ * sonuçları (web_search_tool_result içindeki kaynak/URL listesi) burada hiç
+ * işlenmez/döndürülmez (bkz. kiosk.routes.js WEB_SEARCH dalı — audit() sadece
+ * soru+özet yazar, ham kaynak metnini hiç görmez).
+ *
+ * @param {string} query
+ * @returns {Promise<string>}
+ */
+async function webSearch(query) {
+  const response = await client.messages.create({
+    model:      MODEL,
+    max_tokens: MAX_TOKENS,
+    tools:      [{ type: 'web_search_20250305', name: 'web_search' }],
+    messages:   [{ role: 'user', content: query }],
+  });
+
+  return response.content
+    .filter(block => block.type === 'text')
+    .map(block => block.text)
+    .join('')
+    .trim();
+}
+
+module.exports = { streamChat, chat, buildContext, webSearch };

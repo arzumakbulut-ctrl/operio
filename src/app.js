@@ -13,6 +13,10 @@ const aiRoutes       = require('./routes/ai.routes');
 const notificationRoutes = require('./routes/notification.routes');
 const billingRoutes      = require('./routes/billing.routes');
 const deviceRoutes       = require('./routes/device.routes');
+const kioskAdminRoutes   = require('./routes/kioskAdmin.routes');
+const kioskRoutes        = require('./routes/kiosk.routes');
+const voiceProfileRoutes = require('./routes/voiceProfile.routes');
+const spotifyRoutes      = require('./routes/spotify.routes');
 const { patientRouter, roomRouter, setRouter, auditRouter } = require('./routes/other.routes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 
@@ -72,9 +76,16 @@ app.use(cors({
 }));
 
 // ── GENEL RATE LIMIT ─────────────────────────────────────────
+// /api/kiosk/* bu IP-bazlı limitten MUAF tutulur: kiosk'lar /status'u 15sn'de bir
+// yoklar (tek boştaki kiosk = 60 istek/15dk). Hastanede birkaç kiosk aynı NAT
+// arkasındaysa, IP-bazlı 100/15dk limit dolup HEM kiosk trafiğini HEM de aynı IP'den
+// gelen sıradan klinisyen tarayıcı trafiğini 429'latırdı. Kiosk route'ları bunun yerine
+// kiosk.routes.js'teki, kiosk token'ının jti'sine göre anahtarlanan kendi limitini
+// kullanır (RATE_LIMIT.KIOSK_*). '/api/kiosk-admin' bu muafiyete GİRMEZ (sondaki '/').
 app.use(rateLimit({
   windowMs: RATE_LIMIT.API_WINDOW_MS,
   max:      RATE_LIMIT.API_MAX,
+  skip:     (req) => req.originalUrl.startsWith('/api/kiosk/'),
   standardHeaders: true,
   legacyHeaders:   false,
   message: {
@@ -116,6 +127,10 @@ app.use('/api/security',     securityRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/billing',      billingRoutes);
 app.use('/api/devices',      deviceRoutes);
+app.use('/api/kiosk-admin',  kioskAdminRoutes);
+app.use('/api/kiosk',        kioskRoutes);
+app.use('/api/profile',      voiceProfileRoutes);
+app.use('/api/spotify',      spotifyRoutes);
 app.use('/api/ws',            notificationRoutes);
 app.use('/api/ai',          aiRoutes);
 
