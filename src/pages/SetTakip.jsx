@@ -1,7 +1,67 @@
 import { useState, useRef, useEffect } from 'react';
-import { useDataStore, useUIStore } from '../store';
+import { useNavigate } from 'react-router-dom';
+import { useDataStore, useUIStore, useAuthStore } from '../store';
 import Modal from '../components/ui/Modal';
-import { sterileSetsAPI } from '../services/api';
+import { sterileSetsAPI, moduleAPI } from '../services/api';
+
+// ── AI ile fotoğrafla sayım — görsel sıkıştırma ─────────────────
+// Fotoğraf, canvas'a çizilip maks. 1280px genişliğe indirilir ve JPEG
+// kalite ~0.7 ile sıkıştırılır (mobil kamera fotoğrafları birkaç MB
+// olabilir — backend'e tüm çözünürlüğü göndermemek için).
+//
+// Test ortamı (jsdom) gerçek canvas çizimini desteklemiyor —
+// HTMLCanvasElement.getContext('2d') burada her zaman null döner ve
+// <img>'in onload/onerror olayı HİÇ tetiklenmez (bir zaman aşımına
+// güvenmek yerine burada senkron feature-detect ile atlanıyor). Bu
+// yüzden önce bir "prob" canvas ile gerçek 2D context mevcut mu diye
+// bakılıyor; yoksa (test ortamı) ham (sıkıştırılmamış) base64 ile
+// devam ediliyor — gerçek tarayıcılarda bu dal hiç çalışmaz.
+const VISION_MAX_WIDTH = 1280;
+const VISION_JPEG_QUALITY = 0.7;
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result || ''));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function compressImageFile(file) {
+  const fallbackMediaType = (file?.type && file.type.startsWith('image/')) ? file.type : 'image/jpeg';
+
+  return readFileAsDataUrl(file).then((dataUrl) => {
+    const rawBase64 = dataUrl.split(',')[1] || '';
+
+    const probe = document.createElement('canvas');
+    const probeCtx = probe.getContext && probe.getContext('2d');
+    if (!probeCtx) {
+      // Canvas çizimi desteklenmiyor (test ortamı) — sıkıştırmadan gönder.
+      return { imageBase64: rawBase64, mediaType: fallbackMediaType };
+    }
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, VISION_MAX_WIDTH / (img.width || VISION_MAX_WIDTH));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round((img.width || VISION_MAX_WIDTH) * scale));
+          canvas.height = Math.max(1, Math.round((img.height || VISION_MAX_WIDTH) * scale));
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const jpegDataUrl = canvas.toDataURL('image/jpeg', VISION_JPEG_QUALITY);
+          resolve({ imageBase64: jpegDataUrl.split(',')[1] || rawBase64, mediaType: 'image/jpeg' });
+        } catch {
+          resolve({ imageBase64: rawBase64, mediaType: fallbackMediaType });
+        }
+      };
+      img.onerror = () => resolve({ imageBase64: rawBase64, mediaType: fallbackMediaType });
+      img.src = dataUrl;
+    });
+  }).catch(() => ({ imageBase64: '', mediaType: fallbackMediaType }));
+}
 
 const AKIS_ASAMALARI = [
   { key:'kirli_teslim',    lbl:'Kirli Teslim Alma',   icon:'📦', desc:'QR okutarak alet sayımı yap',          renk:'#DC2626' },
@@ -14,6 +74,8 @@ const AKIS_ASAMALARI = [
 function SayimModal({ setId, onClose }) {
   const { sterilSetlerV2, sterilAkis, sterilAkisGecis, updateSterilAkis } = useDataStore();
   const { showToast } = useUIStore();
+  const { curRole } = useAuthStore();
+  const navigate = useNavigate();
   const s = sterilSetlerV2.find(x => x.id === setId);
   const akis = sterilAkis[setId] || { gercekSayim: {} };
   // Task 1-4'ün hazırladığı 6 seed setinde backendSetId mevcut — bu dal onlar
@@ -32,6 +94,16 @@ function SayimModal({ setId, onClose }) {
   const [salon, setSalon] = useState('');
   const [notlar, setNotlar] = useState('');
 
+  // AI ile fotoğrafla sayım — modül-gated CTA + yakalama akışı.
+  // null = henüz kontrol edilmedi (moduleAPI.mine() dönmedi), true/false = kesin durum.
+  const [visionActive, setVisionActive] = useState(null);
+  const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const fileInputRef = useRef(null);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+
   useEffect(() => {
     if (!hasBackend) return;
     let aktif = true;
@@ -44,6 +116,92 @@ function SayimModal({ setId, onClose }) {
     return () => { aktif = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasBackend, s?.backendSetId]);
+
+  useEffect(() => {
+    if (!hasBackend) return;
+    let aktif = true;
+    moduleAPI.mine().then((mods) => {
+      if (!aktif) return;
+      const list = Array.isArray(mods) ? mods : [];
+      setVisionActive(list.some((m) => m?.slug === 'vision_counting'));
+    }).catch(() => { if (aktif) setVisionActive(false); });
+    return () => { aktif = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasBackend, s?.backendSetId]);
+
+  // Modal kapanırken açık kamera akışı varsa bırak — arka planda çalışan
+  // bir kamera cihazı sızdırılmasın.
+  useEffect(() => () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+  }, []);
+
+  function stopCamera() {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    setCameraOpen(false);
+  }
+
+  async function startCamera() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      showToast('Bu cihazda kamera erişimi desteklenmiyor');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      streamRef.current = stream;
+      if (videoRef.current) videoRef.current.srcObject = stream;
+      setCameraOpen(true);
+    } catch {
+      showToast('Kameraya erişilemedi');
+    }
+  }
+
+  function captureFromCamera() {
+    const video = videoRef.current;
+    if (!video) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { showToast('Kamera görüntüsü yakalanamadı'); return; }
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => { if (blob) handleImageCaptured(blob); }, 'image/jpeg', 0.9);
+    stopCamera();
+  }
+
+  async function handleImageCaptured(fileOrBlob) {
+    if (!fileOrBlob) return;
+    setAiBusy(true);
+    try {
+      const { imageBase64, mediaType } = await compressImageFile(fileOrBlob);
+      const result = await sterileSetsAPI.visionCount(s.backendSetId, { imageBase64, mediaType });
+      if (result?.parsed) {
+        const updates = {};
+        (result.suggestions || []).forEach((sug) => {
+          if (sug?.detectedCount != null) updates[sug.instrumentId] = sug.detectedCount;
+        });
+        setSayimlar(p => ({ ...p, ...updates }));
+      } else {
+        showToast('AI sayamadı, lütfen elle sayın');
+      }
+    } catch (e) {
+      showToast('Fotoğraf analiz edilemedi: ' + (e?.message || ''));
+    } finally {
+      setAiBusy(false);
+      setPhotoMenuOpen(false);
+    }
+  }
+
+  function handleFileInputChange(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (file) handleImageCaptured(file);
+  }
 
   if (!s) return null;
 
@@ -114,6 +272,69 @@ function SayimModal({ setId, onClose }) {
         <span className="tag t-red" style={{ fontSize:9 }}>Kirli Teslim</span>
       </div>
 
+      {/* AI ile fotoğrafla sayım — sadece gerçek backend setlerinde, aletler
+          yüklendikten (yukleniyor) sonra ve modül satın alınmışsa gösterilir. */}
+      {hasBackend && !yukleniyor && visionActive === false && (
+        <div className="empty" style={{ marginBottom:14, padding:'16px 14px' }}>
+          <div className="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:22, height:22 }}>
+              <rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7l1.5-3h5L16 7"/><circle cx="12" cy="13.5" r="3.5"/>
+            </svg>
+          </div>
+          <div className="empty-text">Görsel Alet Sayımı modülü bu kurum için aktif değil.</div>
+          {curRole === 0 && (
+            <button className="btn btn-primary btn-sm" onClick={() => navigate('/abonelik')}>
+              Abonelik sayfasına git →
+            </button>
+          )}
+        </div>
+      )}
+
+      {hasBackend && !yukleniyor && visionActive === true && (
+        <div style={{ marginBottom:14 }}>
+          {!photoMenuOpen ? (
+            <button type="button" className="btn btn-secondary" onClick={() => setPhotoMenuOpen(true)}>
+              📷 Fotoğrafla Say
+            </button>
+          ) : (
+            <div style={{ border:'1px solid var(--border)', borderRadius:10, padding:'12px 14px' }}>
+              <div style={{ fontSize:11, color:'var(--slate-mid)', marginBottom:10 }}>
+                AI ile aletleri say — fotoğraf yükleyin veya kamerayı kullanın. Öneriler sayaçları doldurur, siz hâlâ +/- ile düzeltebilirsiniz.
+              </div>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom: cameraOpen ? 10 : 0 }}>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={aiBusy} onClick={() => fileInputRef.current?.click()}>
+                  Dosyadan Yükle / Kamera
+                </button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={aiBusy} onClick={() => (cameraOpen ? stopCamera() : startCamera())}>
+                  {cameraOpen ? 'Canlı Kamerayı Kapat' : 'Canlı Kamera'}
+                </button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={aiBusy} onClick={() => { stopCamera(); setPhotoMenuOpen(false); }}>
+                  Kapat
+                </button>
+              </div>
+              <input
+                ref={fileInputRef}
+                data-testid="vision-photo-input"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                style={{ display:'none' }}
+                onChange={handleFileInputChange}
+              />
+              {cameraOpen && (
+                <div className="qr-zone" style={{ padding:10 }}>
+                  <video ref={videoRef} autoPlay playsInline muted style={{ width:'100%', borderRadius:8, background:'#000' }} />
+                  <button type="button" className="btn btn-primary btn-sm" style={{ marginTop:8 }} disabled={aiBusy} onClick={captureFromCamera}>
+                    Çek
+                  </button>
+                </div>
+              )}
+              {aiBusy && <div style={{ fontSize:11, color:'var(--slate-light)', marginTop:8 }}>AI analiz ediyor…</div>}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Salon + teslim eden */}
       <div className="fr" style={{ marginBottom:12 }}>
         <div className="fg"><label className="fl">Salon *</label>
@@ -146,7 +367,7 @@ function SayimModal({ setId, onClose }) {
                 <div style={{ textAlign:'center', fontSize:12, fontWeight:600, color:'var(--slate-mid)' }}>{ins.expected_count}</div>
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
                   <div className="cnt-btn" onClick={() => degistir(ins.id, -1, ins.expected_count)}>−</div>
-                  <div className={`cnt-val ${ok?'cnt-ok':fazla?'cnt-fazla':'cnt-miss'}`} style={{ width:30, fontSize:13, fontWeight:800 }}>{say}</div>
+                  <div data-testid={`sayim-value-${ins.id}`} className={`cnt-val ${ok?'cnt-ok':fazla?'cnt-fazla':'cnt-miss'}`} style={{ width:30, fontSize:13, fontWeight:800 }}>{say}</div>
                   <div className="cnt-btn" onClick={() => degistir(ins.id, 1, ins.expected_count)}>+</div>
                 </div>
                 <div style={{ textAlign:'center', fontSize:16 }}>

@@ -4,17 +4,31 @@ import SetTakip from '../../src/pages/SetTakip.jsx';
 import { useDataStore, useUIStore } from '../../src/store';
 import { STERIL_SETLER_V2, initSterilAkis } from '../../src/data/mockData.js';
 
+// SetTakip.jsx (Task 6) Abonelik sayfasına gitmek için useNavigate() kullanıyor —
+// bileşen bir <Router> olmadan da render edilebilsin diye mock'lanıyor.
+vi.mock('react-router-dom', () => ({
+  useNavigate: () => vi.fn(),
+}));
+
 vi.mock('../../src/services/api.js', () => ({
   sterileSetsAPI: {
     get: vi.fn(),
     addTracking: vi.fn().mockResolvedValue({ id: 'log1' }),
+    visionCount: vi.fn(),
+  },
+  // Task 6'nın modül-gated "Fotoğrafla Say" kontrolü için — bu dosyadaki testler
+  // o akışla ilgilenmiyor, sadece SayimModal'ın moduleAPI.mine() çağrısının
+  // çözülmeyen bir promise'de kalmamasını sağlıyoruz.
+  moduleAPI: {
+    mine: vi.fn().mockResolvedValue([]),
   },
 }));
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  const { sterileSetsAPI } = await import('../../src/services/api.js');
+  const { sterileSetsAPI, moduleAPI } = await import('../../src/services/api.js');
   sterileSetsAPI.addTracking.mockResolvedValue({ id: 'log1' });
+  moduleAPI.mine.mockResolvedValue([]);
   // Store'u bilinen bir başlangıç durumuna sıfırla — testler arası kaçak olmasın.
   useDataStore.setState({
     sterilSetlerV2: STERIL_SETLER_V2.map(s => ({ ...s })),
