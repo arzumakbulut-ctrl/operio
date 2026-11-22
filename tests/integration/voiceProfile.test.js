@@ -31,20 +31,73 @@ describe('POST /api/profile/voice-enrollment', () => {
       modelVersion: 'mock-v1',
       enrolledAt,
     });
+    const samples = ['c2FtcGxlLTE=', 'c2FtcGxlLTI=', 'c2FtcGxlLTM='];
 
     const res = await request
       .post('/api/profile/voice-enrollment')
       .set('Authorization', `Bearer ${tok('user-1')}`)
-      .send({ audio: Buffer.from('audio-bytes').toString('base64') });
+      .send({ audioSamples: samples });
 
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual({ modelVersion: 'mock-v1', enrolledAt });
     // route, kiosk token değil kişisel JWT'den gelen req.user.sub'ı userId
     // olarak servise geçirmeli (bkz. task context: authenticate req.user.sub).
-    expect(mockVoiceProfileService.enrollVoiceProfile).toHaveBeenCalledWith(
-      'user-1',
-      Buffer.from('audio-bytes').toString('base64')
+    expect(mockVoiceProfileService.enrollVoiceProfile).toHaveBeenCalledWith('user-1', samples);
+  });
+
+  it('audioSamples 3 eleman değilse 400 döner, servis çağrılmaz', async () => {
+    const res = await request
+      .post('/api/profile/voice-enrollment')
+      .set('Authorization', `Bearer ${tok('user-1')}`)
+      .send({ audioSamples: ['a', 'b'] });
+
+    expect(res.status).toBe(400);
+    expect(mockVoiceProfileService.enrollVoiceProfile).not.toHaveBeenCalled();
+  });
+
+  it('audioSamples hiç gönderilmezse (eski tekil audio alanı dahil) 400 döner', async () => {
+    const res = await request
+      .post('/api/profile/voice-enrollment')
+      .set('Authorization', `Bearer ${tok('user-1')}`)
+      .send({ audio: 'c2FtcGxlLTE=' });
+
+    expect(res.status).toBe(400);
+    expect(mockVoiceProfileService.enrollVoiceProfile).not.toHaveBeenCalled();
+  });
+
+  it('audioSamples dizi değilse 400 döner', async () => {
+    const res = await request
+      .post('/api/profile/voice-enrollment')
+      .set('Authorization', `Bearer ${tok('user-1')}`)
+      .send({ audioSamples: 'c2FtcGxlLTE=' });
+
+    expect(res.status).toBe(400);
+    expect(mockVoiceProfileService.enrollVoiceProfile).not.toHaveBeenCalled();
+  });
+
+  it('servis bir örnek için embedding çıkarılamadığını bildirirse → 400 (500 değil)', async () => {
+    mockVoiceProfileService.enrollVoiceProfile.mockRejectedValueOnce(
+      new Error('Ses örneklerinden biri için embedding çıkarılamadı (konuşma tespit edilemedi)')
     );
+
+    const res = await request
+      .post('/api/profile/voice-enrollment')
+      .set('Authorization', `Bearer ${tok('user-1')}`)
+      .send({ audioSamples: ['c2FtcGxlLTE=', 'c2FtcGxlLTI=', 'c2FtcGxlLTM='] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('beklenmeyen servis hatası → 500 olarak kalır', async () => {
+    mockVoiceProfileService.enrollVoiceProfile.mockRejectedValueOnce(new Error('db down'));
+
+    const res = await request
+      .post('/api/profile/voice-enrollment')
+      .set('Authorization', `Bearer ${tok('user-1')}`)
+      .send({ audioSamples: ['c2FtcGxlLTE=', 'c2FtcGxlLTI=', 'c2FtcGxlLTM='] });
+
+    expect(res.status).toBe(500);
   });
 });
 
