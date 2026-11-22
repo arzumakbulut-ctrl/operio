@@ -80,6 +80,34 @@ describe('SetTakip — SayimModal gerçek backend entegrasyonu', () => {
     );
   });
 
+  it('GET /sterile-sets/:id dönmeden "Sayımı Onayla" tıklanırsa addTracking çağrılmaz — buton devre dışı ve "yükleniyor" durumunda', async () => {
+    const { sterileSetsAPI } = await import('../../src/services/api.js');
+    let resolveGet;
+    sterileSetsAPI.get.mockImplementationOnce(() => new Promise((resolve) => { resolveGet = resolve; }));
+
+    render(<SetTakip />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Teslim Al' }));
+
+    // GET henüz dönmedi (realInstruments === null) — buton "yükleniyor" metniyle
+    // devre dışı olmalı, "Sayımı Onayla" metniyle ETKİN olmamalı.
+    const yukleniyorButonu = await screen.findByRole('button', { name: /Aletler yükleniyor/i });
+    expect(yukleniyorButonu).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Sayımı Onayla/i })).not.toBeInTheDocument();
+
+    fireEvent.click(yukleniyorButonu);
+    expect(sterileSetsAPI.addTracking).not.toHaveBeenCalled();
+
+    // Fetch'i şimdi çöz — gerçek aletler gelince buton normal metnine ve etkin haline dönmeli,
+    // ve önceki (devre dışı) tıklama hiçbir zaman gerçek bir tracking çağrısı üretmemiş olmalı.
+    resolveGet({
+      id: '10000000-0000-0000-0000-000000000001',
+      instruments: [{ id: 'i1', name: 'Trokar 10mm', expected_count: 1, current_count: 1 }],
+    });
+    const onaylaButonu = await screen.findByRole('button', { name: /Sayımı Onayla/i });
+    expect(onaylaButonu).not.toBeDisabled();
+    expect(sterileSetsAPI.addTracking).not.toHaveBeenCalled();
+  });
+
   it('backendSetId olmayan bir set için (varsayımsal) buton "AI sayım henüz tanımlı değil" ile pasifleşir', async () => {
     const { sterileSetsAPI } = await import('../../src/services/api.js');
 

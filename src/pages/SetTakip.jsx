@@ -51,7 +51,14 @@ function SayimModal({ setId, onClose }) {
     setSayimlar(p => ({ ...p, [key]: Math.max(0, (p[key] ?? varsayilan) + delta) }));
   }
 
+  // Backend dalında, gerçek enstrüman listesi henüz yüklenmeden (GET devam
+  // ederken) kaydet() tetiklenirse realInstruments hâlâ null olur — bu
+  // durumda counts:[] gönderilip tamMi yanlışlıkla true olurdu. Bu yüzden
+  // hem kaydet() hem de gönder butonu bu pencerede devre dışı bırakılır.
+  const yukleniyor = hasBackend && realInstruments === null;
+
   function kaydet() {
+    if (yukleniyor) { showToast('Aletler yükleniyor, lütfen bekleyin'); return; }
     if (!teslimEden.trim()) { showToast('Teslim eden personeli girin'); return; }
     if (!salon) { showToast('Salon seçin'); return; }
     const now = new Date();
@@ -179,7 +186,9 @@ function SayimModal({ setId, onClose }) {
 
       <div className="mf">
         <button className="btn btn-secondary" onClick={onClose}>İptal</button>
-        <button className="btn btn-primary" onClick={kaydet}>Sayımı Onayla & Teslim Al</button>
+        <button className="btn btn-primary" onClick={kaydet} disabled={yukleniyor} title={yukleniyor ? 'Aletler yükleniyor…' : undefined}>
+          {yukleniyor ? 'Aletler yükleniyor…' : 'Sayımı Onayla & Teslim Al'}
+        </button>
       </div>
     </Modal>
   );
