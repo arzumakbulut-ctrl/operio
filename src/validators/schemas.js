@@ -68,6 +68,16 @@ const setTrackingSchema = z.object({
   stage:    z.enum(['teslim_alindi','yikama','sterilizasyon','steril','depo']),
   operator: z.string().max(100).optional().nullable(),
   notes:    z.string().max(500).optional().nullable(),
+  counts: z.array(z.object({
+    instrumentId: z.string().uuid(),
+    count:        z.number().int().min(0),
+  })).optional(),
+});
+
+// ── OPERIO VISION (Sterilizasyon Alet Sayımı) ─────────────────
+const visionCountSchema = z.object({
+  imageBase64: z.string().min(1),
+  mediaType:   z.enum(['image/jpeg','image/png']),
 });
 
 // ── SALON ────────────────────────────────────────────────────
@@ -217,4 +227,5 @@ module.exports = {
   deviceConfigSchema,
   mockConfigSchema,
   kioskVoiceCommandSchema,
+  visionCountSchema,
 };

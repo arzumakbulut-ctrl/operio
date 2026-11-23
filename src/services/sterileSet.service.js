@@ -116,10 +116,50 @@ async function updateSet({ id, data, userId, req }) {
 let _globalInstitutionId = null;
 function setCurrentInstitution(id) { _globalInstitutionId = id; }
 
-async function addTrackingLog({ setId, stage, operator, notes, userId, req, institutionId }) {
-  const { rows: logRows } = await db.query(
+async function addTrackingLog({ setId, stage, operator, notes, counts, userId, req, institutionId }) {
+  if (counts !== undefined) {
+    return await db.transaction((client) =>
+      _addTrackingLogCore(client, { setId, stage, operator, notes, counts, userId, req, institutionId })
+    );
+  }
+  return await _addTrackingLogCore(db, { setId, stage, operator, notes, userId, req, institutionId });
+}
+
+// addTrackingLog'un asıl mantığı — `runner` ya düz `db` (counts yoksa) ya da bir
+// `db.transaction` client'ı (counts varsa, tüm adımlar aynı transaction'da) olabilir.
+async function _addTrackingLogCore(runner, { setId, stage, operator, notes, counts, userId, req, institutionId }) {
+  let finalNotes = notes;
+
+  if (counts !== undefined) {
+    const { rows: expectedRows } = await runner.query(
+      'SELECT id, name, expected_count FROM set_instruments WHERE set_id=$1',
+      [setId]
+    );
+    const expectedMap = new Map(expectedRows.map(r => [r.id, { expected_count: r.expected_count, name: r.name }]));
+
+    const missing = [];
+    for (const c of counts) {
+      // id VE set_id BİRLİKTE filtrelenir — client'ın verdiği instrumentId başka bir sete
+      // ait olsa bile bu UPDATE o satırı asla etkilemez (Review Focus #4).
+      await runner.query(
+        'UPDATE set_instruments SET current_count=$1 WHERE id=$2 AND set_id=$3',
+        [c.count, c.instrumentId, setId]
+      );
+
+      const expected = expectedMap.get(c.instrumentId);
+      if (expected != null && c.count < expected.expected_count) {
+        missing.push(expected.name);
+      }
+    }
+
+    if (missing.length) {
+      finalNotes = (notes ? notes + ' | ' : '') + '⚠ Eksik alet: ' + missing.join(', ');
+    }
+  }
+
+  const { rows: logRows } = await runner.query(
     'INSERT INTO set_tracking_logs (set_id, stage, operator, notes) VALUES ($1,$2,$3,$4) RETURNING *',
-    [setId, stage, operator??null, notes??null]
+    [setId, stage, operator??null, finalNotes??null]
   );
 
   const statusMap = {
@@ -129,7 +169,7 @@ async function addTrackingLog({ setId, stage, operator, notes, userId, req, inst
   const newStatus = statusMap[stage];
   if (newStatus) {
     const extraSets = stage === 'steril' ? ', last_sterilized = NOW()' : '';
-    const { rows: updated } = await db.query(
+    const { rows: updated } = await runner.query(
       `UPDATE sterile_sets SET status=$1::set_status${extraSets}, updated_at=NOW()
        WHERE id=$2 RETURNING *`,
       [newStatus, setId]
@@ -149,4 +189,24 @@ async function addTrackingLog({ setId, stage, operator, notes, userId, req, inst
   return logRows[0];
 }
 
-module.exports = { listSets, getSet, createSet, updateSet, addTrackingLog, setCurrentInstitution };
+/**
+ * AI Vision'ın tahmin ettiği alet sayılarını kaydeder (insan onayı ÖNCESİ, ayrı bir
+ * alandır — current_count'u ETKİLEMEZ). detectedCount null olan öneriler atlanır.
+ */
+async function recordVisionSuggestion({ setId, suggestions, userId, req }) {
+  const toUpdate = suggestions.filter(s => s.detectedCount != null);
+
+  for (const s of toUpdate) {
+    await db.query(
+      'UPDATE set_instruments SET last_suggested_count=$1 WHERE id=$2 AND set_id=$3',
+      [s.detectedCount, s.instrumentId, setId]
+    );
+  }
+
+  await audit({ userId, action:'AI_COUNT_SUGGESTION', resource:'sterile_set',
+    resourceId: setId, newData: { suggestions }, req });
+
+  return { updated: toUpdate.length };
+}
+
+module.exports = { listSets, getSet, createSet, updateSet, addTrackingLog, recordVisionSuggestion, setCurrentInstitution };
