@@ -18,6 +18,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 RUN python -c "from app import _load_classifier; _load_classifier()"
 
+# Model build zamanında zaten image içine gömüldü (yukarıdaki RUN) -- bu
+# yüzden runtime'da Hugging Face'e hiçbir ağ çağrısı yapılmasına GEREK YOK.
+# HF_HUB_OFFLINE=1, huggingface_hub'ın (speechbrain'in altında) runtime'da
+# bir "güncelleme var mı" kontrolü için dahi dışa çıkmasını engeller --
+# hastane ağının içinden hiçbir giden ağ çağrısı yapılmaması bu projenin
+# veri-ikameti (data-residency) duruşu için önemlidir (final whole-branch
+# review finding #8).
+ENV HF_HUB_OFFLINE=1
+
 EXPOSE 8001
 
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8001"]
