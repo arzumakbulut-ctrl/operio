@@ -1,16 +1,17 @@
 const { MockSpeakerVerifier } = require('../drivers/MockSpeakerVerifier');
+const { RealSpeakerVerifier } = require('../drivers/RealSpeakerVerifier');
 const registry = require('../services/_registry');
 
 const getKioskService = () => registry.get('kiosk', () => require('../services/kiosk.service'));
 
 /**
- * getSpeakerVerifier — şu an için tek seçenek Mock'tur (gerçek konuşmacı-tanıma
- * entegrasyonu henüz yok). Bu KASITLI olarak cihaz sürücülerindeki driver_key
- * tabanlı registry'den (src/drivers/registry.js, Plan 1) ayrı, küçük bir
- * seçimdir — ileride gerçek bir sürücü eklendiğinde burası genişletilir.
+ * getSpeakerVerifier — kurum konfigürasyonunun mode'una göre seçim yapar:
+ * config.mode === 'real' → RealSpeakerVerifier; aksi halde (demo modları) → Mock.
+ * Bu KASITLI olarak cihaz sürücülerindeki driver_key tabanlı registry'den
+ * (src/drivers/registry.js, Plan 1) ayrı, küçük bir seçimdir.
  */
-function getSpeakerVerifier() {
-  return new MockSpeakerVerifier();
+function getSpeakerVerifier(config) {
+  return (config && config.mode === 'real') ? new RealSpeakerVerifier() : new MockSpeakerVerifier();
 }
 
 /**
@@ -54,7 +55,7 @@ async function kioskSpeakerAuth(req, res, next) {
     // sözleşme (SpeakerVerifier.identify JSDoc): null ses örneği "eşleşme yok" demektir ve
     // ASLA fırlatmamalıdır. MockSpeakerVerifier audioBuffer'ı zaten hiç kullanmaz.
     const audioBuffer = (req.body && req.body.audio) ?? null;
-    const verifier = getSpeakerVerifier();
+    const verifier = getSpeakerVerifier(config);
     const result = await verifier.identify(audioBuffer, candidateUserIds, config);
 
     if (config.mode === 'cycle') {

@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const { authenticate } = require('../middleware/auth');
 const { ok, badRequest, notFound, serverError } = require('../utils/response');
+const { EMBEDDING_FAILED_MESSAGE } = require('../services/voiceProfile.service');
 
 // Servis varsayılan olarak gerçek implementasyonu kullanır
 // Test ortamında mock inject edilebilir (kioskAdmin.routes.js'teki desenle aynı)
@@ -10,15 +11,21 @@ const setService = (svc) => registry.register('voiceProfile', svc);
 
 // Kişisel JWT ile korunur (authenticate) — kiosk token sistemiyle ilgisi yok.
 // req.user.sub, giriş yapmış kullanıcının kendi id'sidir (bkz. middleware/auth.js).
+// Servis, bir örnekten embedding çıkarılamayınca EMBEDDING_FAILED_MESSAGE ile
+// Error fırlatır. Bu bir kullanıcı/ses kalitesi hatasıdır, sunucu hatası değil → 400.
+
 router.post('/voice-enrollment', authenticate, async (req, res) => {
+  const audioSamples = req.body && req.body.audioSamples;
+  if (!Array.isArray(audioSamples) || audioSamples.length !== 3) {
+    return badRequest(res, "'audioSamples' tam olarak 3 elemanlı bir base64 dizisi olmalı");
+  }
   try {
-    const audio = req.body && req.body.audio;
-    if (!audio || typeof audio !== 'string') {
-      return badRequest(res, "'audio' (base64) alanı gerekli");
-    }
-    const result = await getService().enrollVoiceProfile(req.user.sub, audio);
+    const result = await getService().enrollVoiceProfile(req.user.sub, audioSamples);
     return ok(res, result);
   } catch (err) {
+    if (err && err.message === EMBEDDING_FAILED_MESSAGE) {
+      return badRequest(res, err.message);
+    }
     return serverError(res, err);
   }
 });

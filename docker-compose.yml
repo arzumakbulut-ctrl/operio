@@ -36,6 +36,25 @@ services:
     profiles:
       - tools  # sadece: docker compose --profile tools up
 
+  # ── Speaker-ID (iç ağ, dışa port açılmaz) ────────────────
+  speaker-id:
+    build:
+      context: ./speaker-id-service
+    container_name: operio_speaker_id
+    restart: unless-stopped
+    # Final whole-branch review finding #3: GET /health, modül import
+    # zamanında ECAPA-TDNN modeli başarıyla yüklendiğinde 200 döner (bkz.
+    # app.py). curl image'da YOK (sadece ffmpeg kurulu) — image'da zaten
+    # bulunan python'ın kendi urllib'i ile aynı işi yapıyoruz, ek paket
+    # kurmaya gerek kalmıyor. start_period, torch/model başlatma süresine
+    # (ilk istekten önceki soğuk başlangıç) pay bırakır.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
   # ── Operio API ────────────────────────────────────────────
   api:
     build:
@@ -47,11 +66,14 @@ services:
     environment:
       DATABASE_URL: postgresql://operio:operio_secret@postgres:5432/operio_db
       NODE_ENV: production
+      SPEAKER_ID_SERVICE_URL: http://speaker-id:8001
     ports:
       - "4000:4000"
     depends_on:
       postgres:
         condition: service_healthy
+      speaker-id:
+        condition: service_started
     command: >
       sh -c "
         psql \"$$DATABASE_URL\" -f migrations/001_init.sql &&

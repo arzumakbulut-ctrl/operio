@@ -57,27 +57,26 @@ beforeEach(() => {
 });
 
 describe('POST /api/kiosk/rooms/:roomId/voice-command — DEVICE_COMMAND', () => {
-  it('(a) ilk çağrı (confirmationPhrase yok) → kioskSpeakerAuth geçer → 200 + pending_confirmation + phrase', async () => {
+  it('(a) ilk çağrı (confirmationAnswer yok) → kioskSpeakerAuth geçer → 200 + pending_confirmation + doğal dil soru (rakam yok)', async () => {
     const res = await sendVoiceCommand({ transcript: 'koteri aç' });
 
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe('pending_confirmation');
-    expect(res.body.data.phrase).toMatch(/^\d-\d-\d$/);
-    // Kullanıcıya onayda da "Operio" uyandırma kelimesini söylemesi açıkça hatırlatılır
-    // (kiosk istemcisi sadece uyandırma kelimesiyle başlayan ifadeleri işler).
-    expect(res.body.data.say).toBe(
-      `Onaylamak için 'Operio' deyip ardından şu rakamları tekrar söyleyin: ${res.body.data.phrase}`
-    );
+    // Artık rakam-bazlı bir phrase alanı YOK — soru addressSpeaker (hitap) +
+    // describeDeviceAction (eylem açıklaması) ile doğal dilde kurulur.
+    expect(res.body.data.phrase).toBeUndefined();
+    // Final whole-branch review finding #6: "istiyorsunuz" eklendi (eski metin
+    // dilbilgisel olarak eksikti — tasarım dokümanının örneğiyle hizalandı).
+    expect(res.body.data.say).toBe('Ayşe hocam, koteri açmamı istiyorsunuz, doğru mu?');
     expect(mockDeviceService.executeCommand).not.toHaveBeenCalled();
   });
 
-  it('(b) ikinci çağrı, aynı roomId + doğru confirmationPhrase + aynı transcript → executeCommand doğru parametrelerle çağrılır → 200', async () => {
-    const first = await sendVoiceCommand({ transcript: 'koteri aç' });
-    const { phrase } = first.body.data;
+  it('(b) ikinci çağrı, confirmationAnswer: "evet" + aynı transcript → executeCommand doğru parametrelerle çağrılır → 200', async () => {
+    await sendVoiceCommand({ transcript: 'koteri aç' });
 
     mockDeviceService.executeCommand.mockResolvedValueOnce({ id: 'dev-koter', power_state: 'ON' });
 
-    const second = await sendVoiceCommand({ transcript: 'koteri aç', confirmationPhrase: phrase });
+    const second = await sendVoiceCommand({ transcript: 'koteri aç', confirmationAnswer: 'evet' });
 
     expect(second.status).toBe(200);
     expect(mockDeviceService.executeCommand).toHaveBeenCalledWith({
@@ -92,25 +91,40 @@ describe('POST /api/kiosk/rooms/:roomId/voice-command — DEVICE_COMMAND', () =>
     expect(second.body.data.device).toEqual({ id: 'dev-koter', power_state: 'ON' });
   });
 
-  it('(c) ikinci çağrıda YANLIŞ confirmationPhrase → 400 {code: "confirmation_mismatch"}, executeCommand ÇAĞRILMAZ', async () => {
-    const first = await sendVoiceCommand({ transcript: 'koteri aç' });
-    const { phrase } = first.body.data;
-    const wrongPhrase = phrase === '0-0-0' ? '1-0-0' : '0-0-0';
+  it('(c) bekleyen onay yokken (hiç ilk çağrı yapılmamış/süresi geçmiş) confirmationAnswer gönderilirse → 400 {code: "confirmation_mismatch"}, executeCommand ÇAĞRILMAZ', async () => {
+    const res = await sendVoiceCommand({ transcript: 'evet', confirmationAnswer: 'evet' });
 
-    const second = await sendVoiceCommand({ transcript: 'koteri aç', confirmationPhrase: wrongPhrase });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('confirmation_mismatch');
+    expect(mockDeviceService.executeCommand).not.toHaveBeenCalled();
+  });
 
-    expect(second.status).toBe(400);
-    expect(second.body.error.code).toBe('confirmation_mismatch');
+  it('(c2) "hayır" cevabı komut iptal edildi mesajıyla sonuçlanır, executeCommand ÇAĞRILMAZ', async () => {
+    await sendVoiceCommand({ transcript: 'koteri aç' });
+
+    const second = await sendVoiceCommand({ transcript: 'hayır', confirmationAnswer: 'hayır' });
+
+    expect(second.status).toBe(200);
+    expect(second.body.data).toEqual({ type: 'DEVICE_COMMAND', say: 'Komut iptal edildi.' });
+    expect(mockDeviceService.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it('(c3) anlaşılmaz bir cevap sessizce pending_confirmation\'a döner (say boş/null, executeCommand ÇAĞRILMAZ)', async () => {
+    await sendVoiceCommand({ transcript: 'koteri aç' });
+
+    const second = await sendVoiceCommand({ transcript: 'ne diyorsun', confirmationAnswer: 'ne diyorsun' });
+
+    expect(second.status).toBe(200);
+    expect(second.body.data).toEqual({ type: 'DEVICE_COMMAND', status: 'pending_confirmation', say: null });
     expect(mockDeviceService.executeCommand).not.toHaveBeenCalled();
   });
 
   it('(d) masa (table) grubu + kapat/durdur DIŞI ifade ("masayı aç") → action: arm_move (turn_on asla), değer verilmese de null; yanıt hareketin henüz OLMADIĞINI söyler', async () => {
-    const first = await sendVoiceCommand({ transcript: 'masayı aç' });
-    const { phrase } = first.body.data;
+    await sendVoiceCommand({ transcript: 'masayı aç' });
 
     mockDeviceService.executeCommand.mockResolvedValueOnce({ id: 'dev-table', power_state: 'ARMED' });
 
-    const second = await sendVoiceCommand({ transcript: 'masayı aç', confirmationPhrase: phrase });
+    const second = await sendVoiceCommand({ transcript: 'masayı aç', confirmationAnswer: 'evet' });
 
     expect(mockDeviceService.executeCommand).toHaveBeenCalledWith(
       expect.objectContaining({ deviceId: 'dev-table', action: 'arm_move', value: null })
@@ -122,12 +136,11 @@ describe('POST /api/kiosk/rooms/:roomId/voice-command — DEVICE_COMMAND', () =>
   it.each(['masayı kapat', 'masayı durdur'])(
     '(d2) masa (table) + "%s" → action: turn_off (hareket yok, güvenli disarm), jenerik başarı mesajı',
     async (transcript) => {
-      const first = await sendVoiceCommand({ transcript });
-      const { phrase } = first.body.data;
+      await sendVoiceCommand({ transcript });
 
       mockDeviceService.executeCommand.mockResolvedValueOnce({ id: 'dev-table', power_state: 'OFF' });
 
-      const second = await sendVoiceCommand({ transcript, confirmationPhrase: phrase });
+      const second = await sendVoiceCommand({ transcript, confirmationAnswer: 'evet' });
 
       expect(mockDeviceService.executeCommand).toHaveBeenCalledWith(
         expect.objectContaining({ deviceId: 'dev-table', action: 'turn_off' })
@@ -138,12 +151,11 @@ describe('POST /api/kiosk/rooms/:roomId/voice-command — DEVICE_COMMAND', () =>
   );
 
   it('(e) masa grubu + sayısal değer söylenirse bile action hâlâ arm_move kalır (set_power asla)', async () => {
-    const first = await sendVoiceCommand({ transcript: 'masayı 45 derece kaldır' });
-    const { phrase } = first.body.data;
+    await sendVoiceCommand({ transcript: 'masayı 45 derece kaldır' });
 
     mockDeviceService.executeCommand.mockResolvedValueOnce({ id: 'dev-table', power_state: 'ARMED' });
 
-    await sendVoiceCommand({ transcript: 'masayı 45 derece kaldır', confirmationPhrase: phrase });
+    await sendVoiceCommand({ transcript: 'masayı 45 derece kaldır', confirmationAnswer: 'evet' });
 
     expect(mockDeviceService.executeCommand).toHaveBeenCalledWith(
       expect.objectContaining({ deviceId: 'dev-table', action: 'arm_move', value: 45 })
@@ -151,12 +163,11 @@ describe('POST /api/kiosk/rooms/:roomId/voice-command — DEVICE_COMMAND', () =>
   });
 
   it('(f) sayısal değerli komut (koter 50) → action: set_power, value: 50', async () => {
-    const first = await sendVoiceCommand({ transcript: 'koteri 50 yap' });
-    const { phrase } = first.body.data;
+    await sendVoiceCommand({ transcript: 'koteri 50 yap' });
 
     mockDeviceService.executeCommand.mockResolvedValueOnce({ id: 'dev-koter', power_state: 'ON' });
 
-    await sendVoiceCommand({ transcript: 'koteri 50 yap', confirmationPhrase: phrase });
+    await sendVoiceCommand({ transcript: 'koteri 50 yap', confirmationAnswer: 'evet' });
 
     expect(mockDeviceService.executeCommand).toHaveBeenCalledWith(
       expect.objectContaining({ deviceId: 'dev-koter', action: 'set_power', value: 50 })
@@ -164,12 +175,11 @@ describe('POST /api/kiosk/rooms/:roomId/voice-command — DEVICE_COMMAND', () =>
   });
 
   it('(g) "kapat" transcript → action: turn_off', async () => {
-    const first = await sendVoiceCommand({ transcript: 'koteri kapat' });
-    const { phrase } = first.body.data;
+    await sendVoiceCommand({ transcript: 'koteri kapat' });
 
     mockDeviceService.executeCommand.mockResolvedValueOnce({ id: 'dev-koter', power_state: 'OFF' });
 
-    await sendVoiceCommand({ transcript: 'koteri kapat', confirmationPhrase: phrase });
+    await sendVoiceCommand({ transcript: 'koteri kapat', confirmationAnswer: 'evet' });
 
     expect(mockDeviceService.executeCommand).toHaveBeenCalledWith(
       expect.objectContaining({ deviceId: 'dev-koter', action: 'turn_off' })
@@ -206,20 +216,20 @@ describe('POST /api/kiosk/rooms/:roomId/voice-command — DEVICE_COMMAND', () =>
 });
 
 describe('POST /api/kiosk/rooms/:roomId/voice-command — gerçekçi istemci onay döngüsü', () => {
-  // Gerçek kiosk istemcisi onay çağrısında transcript olarak SADECE söylenen rakamları
-  // gönderir — bu metin tek başına DEVICE_COMMAND olarak ayrıştırılmaz. confirmationPhrase
-  // varken route parseIntent'i hiç çalıştırmamalı.
+  // Gerçek kiosk istemcisi onay çağrısında transcript olarak kullanıcının söylediği
+  // serbest metni, confirmationAnswer'da ise ayrıştırılmış evet/hayır cevabını gönderir.
+  // confirmationAnswer varken route parseIntent'i hiç çalıştırmamalı — transcript'in
+  // içeriği (UNKNOWN'a ya da başka bir niyete ayrışsa da) yönlendirmeyi etkilemez.
   it.each([
     ['dört yedi iki', 'Türkçe sayı kelimeleri (tek başına UNKNOWN)'],
     ['472', 'bitişik rakamlar (tek başına UNKNOWN)'],
     ['Operio time-out', 'başka bir niyete (TIMEOUT) ayrışan metin'],
-  ])('(k) ikinci çağrı transcript="%s" (%s) + doğru confirmationPhrase → komut yine uygulanır', async (confirmTranscript) => {
-    const first = await sendVoiceCommand({ transcript: 'koteri aç' });
-    const { phrase } = first.body.data;
+  ])('(k) ikinci çağrı transcript="%s" (%s) + confirmationAnswer: "evet" → komut yine uygulanır', async (confirmTranscript) => {
+    await sendVoiceCommand({ transcript: 'koteri aç' });
 
     mockDeviceService.executeCommand.mockResolvedValueOnce({ id: 'dev-koter', power_state: 'ON' });
 
-    const second = await sendVoiceCommand({ transcript: confirmTranscript, confirmationPhrase: phrase });
+    const second = await sendVoiceCommand({ transcript: confirmTranscript, confirmationAnswer: 'evet' });
 
     expect(second.status).toBe(200);
     expect(second.body.data.type).toBe('DEVICE_COMMAND');
@@ -235,20 +245,18 @@ describe('POST /api/kiosk/rooms/:roomId/voice-command — gerçekçi istemci ona
     });
   });
 
-  it('(l) confirmationPhrase farklı biçimde gelirse ("4 7 2" ↔ saklanan "4-7-2") → yine eşleşir', async () => {
-    const first = await sendVoiceCommand({ transcript: 'koteri aç' });
-    const { phrase } = first.body.data;
-    const spaced = phrase.split('-').join(' '); // "4-7-2" → "4 7 2"
+  it('(l) "evet" yerine eş anlamlı bir onay kelimesi ("tamam") gelirse → yine confirmed sayılır', async () => {
+    await sendVoiceCommand({ transcript: 'koteri aç' });
 
     mockDeviceService.executeCommand.mockResolvedValueOnce({ id: 'dev-koter', power_state: 'ON' });
 
-    const second = await sendVoiceCommand({ transcript: 'dört yedi iki', confirmationPhrase: spaced });
+    const second = await sendVoiceCommand({ transcript: 'tamam', confirmationAnswer: 'tamam' });
 
     expect(second.status).toBe(200);
     expect(mockDeviceService.executeCommand).toHaveBeenCalledTimes(1);
   });
 
-  it('(m) onay çağrısında FARKLI bir ekip üyesi tanınırsa (cycle modu) → doğru phrase ile bile 400 confirmation_mismatch, executeCommand ÇAĞRILMAZ', async () => {
+  it('(m) onay çağrısında FARKLI bir ekip üyesi tanınırsa (cycle modu) → unresolved olarak ele alınır (200 pending_confirmation, say: null), executeCommand ÇAĞRILMAZ; entry silinmez, asıl başlatan hâlâ onaylayabilir', async () => {
     mockKioskService.getActiveSurgeryForRoom.mockResolvedValue({
       id: 'surgery-1',
       surgeryTeams: [
@@ -265,16 +273,15 @@ describe('POST /api/kiosk/rooms/:roomId/voice-command — gerçekçi istemci ona
 
     const first = await sendVoiceCommand({ transcript: 'koteri aç' });
     expect(first.body.data.status).toBe('pending_confirmation');
-    const { phrase } = first.body.data;
 
-    const other = await sendVoiceCommand({ transcript: phrase, confirmationPhrase: phrase });
-    expect(other.status).toBe(400);
-    expect(other.body.error.code).toBe('confirmation_mismatch');
+    const other = await sendVoiceCommand({ transcript: 'evet', confirmationAnswer: 'evet' });
+    expect(other.status).toBe(200);
+    expect(other.body.data).toEqual({ type: 'DEVICE_COMMAND', status: 'pending_confirmation', say: null });
     expect(mockDeviceService.executeCommand).not.toHaveBeenCalled();
 
     // Bekleyen onay silinmedi — asıl başlatan (speaker-1) TTL içinde hâlâ onaylayabilir.
     mockDeviceService.executeCommand.mockResolvedValueOnce({ id: 'dev-koter', power_state: 'ON' });
-    const genuine = await sendVoiceCommand({ transcript: phrase, confirmationPhrase: phrase });
+    const genuine = await sendVoiceCommand({ transcript: 'evet', confirmationAnswer: 'evet' });
     expect(genuine.status).toBe(200);
     expect(mockDeviceService.executeCommand).toHaveBeenCalledTimes(1);
     expect(mockDeviceService.executeCommand).toHaveBeenCalledWith(
@@ -291,22 +298,20 @@ describe('POST /api/kiosk/rooms/:roomId/voice-command — gerçekçi istemci ona
   });
 
   it('(o) audio: null ile onay çağrısı da çalışır', async () => {
-    const first = await sendVoiceCommand({ transcript: 'koteri aç', audio: null });
-    const { phrase } = first.body.data;
+    await sendVoiceCommand({ transcript: 'koteri aç', audio: null });
     mockDeviceService.executeCommand.mockResolvedValueOnce({ id: 'dev-koter', power_state: 'ON' });
 
-    const second = await sendVoiceCommand({ transcript: 'dört yedi iki', confirmationPhrase: phrase, audio: null });
+    const second = await sendVoiceCommand({ transcript: 'evet', confirmationAnswer: 'evet', audio: null });
 
     expect(second.status).toBe(200);
     expect(mockDeviceService.executeCommand).toHaveBeenCalledTimes(1);
   });
 
   it('(p) onay çağrısında konuşmacı tanınamazsa (always_unrecognized) → 403 unrecognized, executeCommand ÇAĞRILMAZ', async () => {
-    const first = await sendVoiceCommand({ transcript: 'koteri aç' });
-    const { phrase } = first.body.data;
+    await sendVoiceCommand({ transcript: 'koteri aç' });
     mockKioskService.getMockConfig.mockResolvedValueOnce({ mode: 'always_unrecognized', cycleIndex: 0 });
 
-    const second = await sendVoiceCommand({ transcript: 'dört yedi iki', confirmationPhrase: phrase });
+    const second = await sendVoiceCommand({ transcript: 'evet', confirmationAnswer: 'evet' });
 
     expect(second.status).toBe(403);
     expect(second.body.error.code).toBe('unrecognized');

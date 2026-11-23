@@ -98,9 +98,15 @@ describe('POST /api/kiosk/rooms/:roomId/voice-command', () => {
   });
 
   it('(e) UNKNOWN — hiçbir anahtar kelimeyle eşleşmeyen transcript → 200 + say dolu', async () => {
+    // Farklı bir roomId kullanılır: kiosk.routes.js'teki ardışık-UNKNOWN sayacı
+    // (Task 9) roomId'ye göre tutulur — (d) testi 'room-1' için sayacı zaten 1'e
+    // çıkardığından aynı odada ikinci bir UNKNOWN burada kademeli (escalated)
+    // mesajı tetikler; bu test tek seferlik "Anlayamadım" yanıtını doğrulamak
+    // istediği için kendi izole odasını kullanır.
+    const roomId = 'room-unknown-e';
     const res = await request
-      .post('/api/kiosk/rooms/room-1/voice-command')
-      .set('Authorization', authHeader())
+      .post(`/api/kiosk/rooms/${roomId}/voice-command`)
+      .set('Authorization', authHeader(roomId))
       .send({ transcript: 'asdasd zzz qqq', audio: 'base64-audio-stub' });
 
     expect(res.status).toBe(200);
@@ -165,5 +171,46 @@ describe('POST /api/kiosk/rooms/:roomId/voice-command', () => {
       .send({ transcript: 'Operio time-out', audio: 123 });
 
     expect(res.status).toBe(400);
+  });
+
+  it('(l) ardışık iki UNKNOWN denemesi → ikincisinde kademeli (daha net) mesaj döner (Task 9)', async () => {
+    const roomId = 'room-unknown-streak';
+
+    const first = await request
+      .post(`/api/kiosk/rooms/${roomId}/voice-command`)
+      .set('Authorization', authHeader(roomId))
+      .send({ transcript: 'asdasd zzz qqq', audio: 'base64-audio-stub' });
+    expect(first.body.data.say).toBe('Anlayamadım, tekrar söyler misiniz?');
+
+    const second = await request
+      .post(`/api/kiosk/rooms/${roomId}/voice-command`)
+      .set('Authorization', authHeader(roomId))
+      .send({ transcript: 'yine anlamsız bir şey', audio: 'base64-audio-stub' });
+
+    expect(second.status).toBe(200);
+    expect(second.body.data.type).toBe('UNKNOWN');
+    expect(second.body.data.say).toBe('Ne demek istediğinizi anlamadım, herhangi bir işlem yapmıyorum.');
+  });
+
+  it('(m) UNKNOWN sonrası araya başka bir intent (TIMEOUT) girerse sayaç sıfırlanır — sıradaki UNKNOWN yine ilk mesajı döner (Task 9)', async () => {
+    const roomId = 'room-unknown-reset';
+
+    await request
+      .post(`/api/kiosk/rooms/${roomId}/voice-command`)
+      .set('Authorization', authHeader(roomId))
+      .send({ transcript: 'asdasd zzz qqq', audio: 'base64-audio-stub' });
+
+    await request
+      .post(`/api/kiosk/rooms/${roomId}/voice-command`)
+      .set('Authorization', authHeader(roomId))
+      .send({ transcript: 'Operio time-out', audio: 'base64-audio-stub' });
+
+    const third = await request
+      .post(`/api/kiosk/rooms/${roomId}/voice-command`)
+      .set('Authorization', authHeader(roomId))
+      .send({ transcript: 'yine anlamsız bir şey', audio: 'base64-audio-stub' });
+
+    expect(third.status).toBe(200);
+    expect(third.body.data.say).toBe('Anlayamadım, tekrar söyler misiniz?');
   });
 });
