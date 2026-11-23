@@ -46,6 +46,28 @@ describe('kioskConfirmation.service — evet/hayır', () => {
     expect(resolvePendingConfirmation('room-unclear', 'evet', 'u1')).toEqual({ status: 'confirmed', payload });
   });
 
+  it('final whole-branch review finding #5: sondaki noktalamalı "evet." confirmed döner (konuşma tanıma bazen noktalama ekler)', () => {
+    const payload = { deviceId: 'd13', action: 'turn_on', initiatingUserId: 'u1' };
+    createPendingConfirmation('room-trailing-dot-yes', payload);
+
+    expect(resolvePendingConfirmation('room-trailing-dot-yes', 'evet.', 'u1')).toEqual({ status: 'confirmed', payload });
+  });
+
+  it('final whole-branch review finding #5: sondaki noktalamalı "hayır!" cancelled döner', () => {
+    createPendingConfirmation('room-trailing-bang-no', { deviceId: 'd14', initiatingUserId: 'u1' });
+
+    expect(resolvePendingConfirmation('room-trailing-bang-no', 'hayır!', 'u1')).toEqual({ status: 'cancelled' });
+  });
+
+  it('final whole-branch review finding #5: noktalama kırpma, olumsuzlanmış "evet değil." ifadesini hâlâ unresolved bırakır (güvenlik özelliği korunur)', () => {
+    const payload = { deviceId: 'd15', action: 'set_power', initiatingUserId: 'u1' };
+    createPendingConfirmation('room-trailing-dot-negated', payload);
+
+    expect(resolvePendingConfirmation('room-trailing-dot-negated', 'evet değil.', 'u1')).toEqual({ status: 'unresolved' });
+    // entry silinmedi — aynı başlatan hâlâ düz "evet" ile onaylayabilir.
+    expect(resolvePendingConfirmation('room-trailing-dot-negated', 'evet', 'u1')).toEqual({ status: 'confirmed', payload });
+  });
+
   it('"evet" ile başlayan ama olumsuzlanan ifade ("evet değil") confirmed DEĞİL unresolved döner, entry SİLİNMEZ', () => {
     const payload = { deviceId: 'd10', action: 'set_power', initiatingUserId: 'u1' };
     createPendingConfirmation('room-yes-negated', payload);

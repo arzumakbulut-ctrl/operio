@@ -34,6 +34,16 @@ const TTL_MS = 20000;
 const YES_RE = /^(evet|tamam|onaylıyorum|olur)$/i;
 const NO_RE = /^(hayır|hayir|yok|istemiyorum|iptal)$/i;
 
+// Final whole-branch review finding #5: konuşma tanıma bazen sondaki
+// noktalamayı da döndürür ("evet." / "hayır,") — bu tek fark, anchor'lı
+// YES_RE/NO_RE'nin tam eşleşmesini bozup komutu sessizce TTL'e kadar
+// unresolved'da bırakıyordu. Sadece SONDAKİ noktalama (tekrarlanabilir)
+// kırpılır, ardından yeniden trim edilir — "evet değil." gibi olumsuzlanmış
+// bir ifadenin ortasındaki/ÖNCESİNDEKİ kelimeler ETKİLENMEZ, dolayısıyla o
+// hâlâ YES_RE/NO_RE'yle eşleşmez (unresolved kalır) — anchor'lı
+// tam-eşleşme güvenlik özelliği KORUNUR.
+const TRAILING_PUNCTUATION_RE = /[.!?,;:]+$/;
+
 function createPendingConfirmation(roomId, payload) {
   PENDING.set(roomId, { payload, expiresAt: Date.now() + TTL_MS });
   return {};
@@ -61,7 +71,9 @@ function resolvePendingConfirmation(roomId, answerText, confirmingUserId) {
     return { status: 'unresolved' };
   }
 
-  const text = typeof answerText === 'string' ? answerText.trim().toLowerCase() : '';
+  const text = typeof answerText === 'string'
+    ? answerText.trim().toLowerCase().replace(TRAILING_PUNCTUATION_RE, '').trim()
+    : '';
 
   if (YES_RE.test(text)) {
     PENDING.delete(roomId);
