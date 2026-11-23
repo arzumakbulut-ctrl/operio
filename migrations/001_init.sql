@@ -429,7 +429,7 @@ CREATE INDEX IF NOT EXISTS idx_kiosk_tokens_room ON kiosk_tokens(room_id);
 CREATE TABLE IF NOT EXISTS kiosk_mock_config (
   institution_id UUID        PRIMARY KEY REFERENCES institutions(id),
   mode           VARCHAR(20) NOT NULL DEFAULT 'always_match'
-                 CHECK (mode IN ('always_match','always_reject_team','always_unrecognized','cycle')),
+                 CHECK (mode IN ('always_match','always_reject_team','always_unrecognized','cycle','real')),
   cycle_index    INTEGER     NOT NULL DEFAULT 0
 );
 

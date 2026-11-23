@@ -25,3 +25,8 @@ test('001_init.sql seeds set_instruments idempotently (fixed ids + ON CONFLICT (
   expect(ids).toHaveLength(26);
   expect(new Set(ids).size).toBe(26);
 });
+
+test("kiosk_mock_config.mode CHECK allows 'real' alongside the existing modes", () => {
+  const sql = readFileSync('migrations/001_init.sql', 'utf8');
+  expect(sql).toMatch(/CHECK \(mode IN \('always_match','always_reject_team','always_unrecognized','cycle','real'\)\)/);
+});

@@ -12,6 +12,7 @@ const { handleCommandError } = require('../utils/deviceCommandErrors');
 const { createPendingConfirmation, resolvePendingConfirmation } = require('../services/kioskConfirmation.service');
 const { MockSpotifyPlaybackDriver } = require('../drivers/MockSpotifyPlaybackDriver');
 const { isClinicalQuestion } = require('../utils/clinicalQuestionClassifier');
+const { addressSpeaker, describeDeviceAction } = require('../utils/kioskAddressing');
 
 // Servis varsayılan olarak gerçek implementasyonu kullanır
 // Test ortamında mock inject edilebilir (device.routes.js'teki desenle aynı)
@@ -120,6 +121,16 @@ const TIMEOUT_SENTENCES = [
 ];
 
 const UNKNOWN_RESPONSE = { type: 'UNKNOWN', say: 'Anlayamadım, tekrar söyler misiniz?' };
+const UNKNOWN_ESCALATED_RESPONSE = {
+  type: 'UNKNOWN',
+  say: 'Ne demek istediğinizi anlamadım, herhangi bir işlem yapmıyorum.',
+};
+
+// roomId → ardışık UNKNOWN sayısı. kioskConfirmation.service.js'teki bellek-içi
+// Map deseniyle tutarlı (DB YOK, registry YOK, saf JS) — sadece kademeli mesaj
+// seçimi için tutulur, TTL'si yok: herhangi bir BAŞKA intent tipi (onay dalı
+// dahil) sayacı sıfırlar, bu yüzden sonsuza kadar büyümez.
+const UNKNOWN_STREAK = new Map();
 
 /**
  * kioskRateLimitKey — kiosk limitinin anahtarı. app.js'teki genel IP-bazlı limit
@@ -186,17 +197,21 @@ const CONFIRMATION_MISMATCH_BODY = {
  *   checklist'in bu iki maddesi ekipteki herkes tarafından okunabilir/teyit edilebilir,
  *   konuşmacı kimliği doğrulaması istemez. audit() 'voice:timeout_read' ile yazılır
  *   (userId: null — konuşmacı tanımlanmadı).
- * - ONAY ÇAĞRISI (body.confirmationPhrase dolu bir string): parseIntent HİÇ çalışmaz —
- *   transcript (genelde sadece söylenen onay rakamları) yönlendirmeyi etkilemez.
- *   kioskSpeakerAuth'tan geçilir, bekleyen onay (rakam-bazlı karşılaştırma + başlatan
- *   konuşmacıyla eşleşme) çözülür ve device.service.executeCommand() çağrılır (kendi
- *   audit()'ini kendi yazar). Bu ikinci çağrı da kioskRoomAuth'tan GEÇER — ameliyat artık
- *   IN_PROGRESS değilse bekleyen onaya hiç bakılmadan 409 döner (Review Focus #2).
+ * - ONAY ÇAĞRISI (body.confirmationAnswer dolu bir string): parseIntent HİÇ çalışmaz —
+ *   transcript (genelde sadece söylenen "evet"/"hayır" cevabı) yönlendirmeyi etkilemez.
+ *   kioskSpeakerAuth'tan geçilir, bekleyen onay (doğal dil evet/hayır + başlatan
+ *   konuşmacıyla eşleşme, bkz. kioskConfirmation.service.js) resolvePendingConfirmation'ın
+ *   4 sonucundan birine (null/unresolved/cancelled/confirmed) bağlanır; sadece 'confirmed'
+ *   device.service.executeCommand()'ı tetikler (kendi audit()'ini kendi yazar). Bu ikinci
+ *   çağrı da kioskRoomAuth'tan GEÇER — ameliyat artık IN_PROGRESS değilse bekleyen onaya
+ *   hiç bakılmadan 409 döner (Review Focus #2).
  * - DEVICE_COMMAND (Task 7, ilk çağrı): kioskSpeakerAuth'tan geçer (req.speaker doldurulur),
  *   eylem türetilir, hedef cihaz bulunur ve kioskConfirmation.service'te konuşmacıya bağlı
- *   bir bekleyen onay (10sn TTL) oluşturulup phrase döner.
+ *   bir bekleyen onay (20sn TTL) oluşturulup addressSpeaker+describeDeviceAction'dan kurulu
+ *   doğal bir soru ("{Ad} [hocam], {eylem} istiyorsunuz, doğru mu?") döner (Task 9 — artık
+ *   rakam YOK; final whole-branch review finding #6 — "istiyorsunuz" yüklemi eklendi).
  * - SPOTIFY_PLAY (Task 9): DEVICE_COMMAND gibi kioskSpeakerAuth'tan manuel geçer, AMA
- *   DEVICE_COMMAND'ın aksine TEK adımda sonuçlanır — sesli onay döngüsüne (confirmationPhrase/
+ *   DEVICE_COMMAND'ın aksine TEK adımda sonuçlanır — sesli onay döngüsüne (confirmationAnswer/
  *   createPendingConfirmation) HİÇ girmez. Sırasıyla: transcript'ten sorgu çıkarılır
  *   (extractSpotifyQuery) → spotify.service.refreshAccessTokenIfNeeded ile access token
  *   alınır (bağlantı yoksa 404 fırlatır — bu durumda kullanıcıya özel bir "bağlı değil"
@@ -220,13 +235,13 @@ router.post(
   validate(kioskVoiceCommandSchema),
   async (req, res) => {
     try {
-      const { confirmationPhrase } = req.body;
+      const { confirmationAnswer } = req.body;
 
-      if (typeof confirmationPhrase === 'string' && confirmationPhrase.trim().length > 0) {
+      if (typeof confirmationAnswer === 'string' && confirmationAnswer.trim().length > 0) {
         // İkinci (onay) çağrısı — parseIntent'ten ÖNCE ve ONDAN BAĞIMSIZ ele alınır.
-        // Gerçek istemci bu çağrıda transcript olarak kullanıcının söylediği onay
-        // rakamlarını gönderir ("4 7 2", "dört yedi iki" …); bu metin parseIntent'e
-        // girseydi UNKNOWN sınıflanır ve onay hiç çözülmezdi. confirmationPhrase varken
+        // Gerçek istemci bu çağrıda transcript olarak kullanıcının söylediği serbest
+        // metni gönderir; confirmationAnswer ise ayrıştırılmış evet/hayır cevabını taşır
+        // ("evet", "hayır", ya da anlaşılmaz bir şey). confirmationAnswer varken
         // transcript'in içeriği yönlendirmeyi HİÇ etkilemez; eylem/cihaz bilgisi zaten
         // bekleyen payload'da saklıdır.
         //
@@ -239,13 +254,34 @@ router.post(
         if (speakerAuthErr) throw speakerAuthErr;
         if (res.headersSent) return;
 
-        // Bekleyen onay yoksa / süresi geçmişse / rakamlar yanlışsa / onaylayan kişi komutu
-        // BAŞLATAN kişi değilse (initiatingUserId) null döner — hepsi aynı 400.
-        const payload = resolvePendingConfirmation(req.kiosk.roomId, confirmationPhrase, req.speaker.userId);
-        if (!payload) {
+        // Onay dalına girildi — bu bir UNKNOWN deneme değil, sayaç sıfırlanır (bkz.
+        // dosya başı UNKNOWN_STREAK yorumu).
+        UNKNOWN_STREAK.delete(req.kiosk.roomId);
+
+        // resolvePendingConfirmation 4 sonuçtan birini döner (bkz. kioskConfirmation.
+        // service.js dosya başı yorumu):
+        //   null                          → bekleyen onay yok/süresi geçti
+        //   {status:'unresolved'}         → anlaşılmayan cevap VEYA yanlış konuşmacı;
+        //                                   entry silinmez, sessizce yeniden sorulur
+        //   {status:'cancelled'}          → açık "hayır"
+        //   {status:'confirmed', payload} → açık "evet", doğru konuşmacı
+        const result = resolvePendingConfirmation(req.kiosk.roomId, confirmationAnswer, req.speaker.userId);
+
+        if (!result) {
           return res.status(400).json(CONFIRMATION_MISMATCH_BODY);
         }
 
+        if (result.status === 'unresolved') {
+          // Kullanıcıya tekrar sormak için yeni bir söz üretmiyoruz (say: null) —
+          // kiosk istemcisi bu durumda son soruyu değiştirmeden bekler.
+          return ok(res, { type: 'DEVICE_COMMAND', status: 'pending_confirmation', say: null });
+        }
+
+        if (result.status === 'cancelled') {
+          return ok(res, { type: 'DEVICE_COMMAND', say: 'Komut iptal edildi.' });
+        }
+
+        const { payload } = result;
         try {
           const updated = await getDeviceService().executeCommand({
             deviceId: payload.deviceId,
@@ -263,6 +299,12 @@ router.post(
       }
 
       const intent = parseIntent(req.body.transcript);
+
+      // intent.type UNKNOWN DIŞINDA bir şeye ayrıştı — ardışık "anlayamadım" dizisi
+      // bozuldu, sayaç sıfırlanır (bkz. dosya başı UNKNOWN_STREAK yorumu).
+      if (intent.type !== 'UNKNOWN') {
+        UNKNOWN_STREAK.delete(req.kiosk.roomId);
+      }
 
       if (intent.type === 'TIMEOUT') {
         await getKioskService().recordTimeoutRead({ surgeryId: req.activeSurgery.id, req });
@@ -293,7 +335,7 @@ router.post(
           });
         }
 
-        // (confirmationPhrase'li onay çağrısı buraya hiç ulaşmaz — handler'ın başında,
+        // (confirmationAnswer'lı onay çağrısı buraya hiç ulaşmaz — handler'ın başında,
         // parseIntent'ten önce ele alınır.) Hedef cihazı bul ve bekleyen onay oluştur.
         // listDevices deviceGroup filtresi ALMAZ (sadece kurum+oda) — dönen listeden
         // device_group'u eşleşen İLK cihaz seçilir (birden fazla eşleşirse ilki kazanır).
@@ -308,19 +350,23 @@ router.post(
 
         // initiatingUserId: bekleyen onay, komutu başlatan konuşmacıya bağlanır — onay
         // çağrısında FARKLI bir ekip üyesi tanımlanırsa resolvePendingConfirmation reddeder.
-        const { phrase } = createPendingConfirmation(req.kiosk.roomId, {
+        // createPendingConfirmation artık bir şey DÖNDÜRMEZ (bkz. kioskConfirmation.
+        // service.js) — doğal dil sorusu addressSpeaker+describeDeviceAction'dan kurulur.
+        createPendingConfirmation(req.kiosk.roomId, {
           deviceId: device.id,
           action: derived.action,
           value: derived.value,
           initiatingUserId: req.speaker.userId,
         });
-        // Kiosk istemcisi sadece "Operio" uyandırma kelimesiyle başlayan ifadeleri işler —
-        // kullanıcıya onayda da uyandırma kelimesini söylemesi açıkça hatırlatılır.
+        // "istiyorsunuz" EKLENDİ (final whole-branch review finding #6) — eski
+        // metin dilbilgisel olarak eksikti ("...koteri açmamı, doğru mu?",
+        // yüklemsiz); tasarım dokümanının kendi örneği
+        // ("...yapmamı istiyorsunuz, doğru mu?") ile hizalandı.
+        const say = `${addressSpeaker(req.speaker)}, ${describeDeviceAction(groupKeyword, derived.action, derived.value)} istiyorsunuz, doğru mu?`;
         return ok(res, {
           type: 'DEVICE_COMMAND',
           status: 'pending_confirmation',
-          phrase,
-          say: `Onaylamak için 'Operio' deyip ardından şu rakamları tekrar söyleyin: ${phrase}`,
+          say,
         });
       }
 
@@ -404,8 +450,13 @@ router.post(
         return ok(res, { type: 'WEB_SEARCH', say: finalAnswer });
       }
 
-      // UNKNOWN ve henüz implemente edilmemiş diğer tipler için ortak fallback.
-      return ok(res, UNKNOWN_RESPONSE);
+      // UNKNOWN (parseIntent'in döndürdüğü tek diğer tip) — ardışık deneme sayısına
+      // göre kademeli mesaj: ilk başarısızlıkta nazik tekrar isteği, ikinci ve
+      // sonraki ardışık başarısızlıklarda "hiçbir işlem yapmıyorum" ile netleştirme
+      // (bkz. dosya başı UNKNOWN_STREAK yorumu).
+      const streak = (UNKNOWN_STREAK.get(req.kiosk.roomId) || 0) + 1;
+      UNKNOWN_STREAK.set(req.kiosk.roomId, streak);
+      return ok(res, streak >= 2 ? UNKNOWN_ESCALATED_RESPONSE : UNKNOWN_RESPONSE);
     } catch (err) {
       return serverError(res, err);
     }

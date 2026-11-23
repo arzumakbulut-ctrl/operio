@@ -131,4 +131,19 @@ describe('PUT /api/kiosk-admin/mock-config', () => {
     expect(res.body.data).toEqual({ mode: 'cycle', cycleIndex: 0 });
     expect(mockKioskService.setMockConfig).toHaveBeenCalledWith('inst-1', 'cycle');
   });
+
+  // Final whole-branch review finding #2: mockConfigSchema'nın zod enum'u
+  // sadece 4 demo modunu listeliyordu — migration'ın kiosk_mock_config.mode
+  // CHECK kısıtı 'real'i kabul etse de, admin API bunu 400 ile reddediyordu
+  // (gerçek mod sadece elle SQL ile açılabiliyordu).
+  it("mode: 'real' → 200 (migration'ın CHECK kısıtıyla aynı 5. değer artık zod'da da kabul ediliyor)", async () => {
+    mockKioskService.setMockConfig.mockResolvedValueOnce({ mode: 'real', cycleIndex: 0 });
+    const res = await request
+      .put('/api/kiosk-admin/mock-config')
+      .set('Authorization', `Bearer ${tok(0)}`)
+      .send({ mode: 'real' });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ mode: 'real', cycleIndex: 0 });
+    expect(mockKioskService.setMockConfig).toHaveBeenCalledWith('inst-1', 'real');
+  });
 });

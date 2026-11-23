@@ -1,0 +1,171 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+/**
+ * RealSpeakerVerifier.identify, `speakerIdClient.getEmbedding` ve
+ * `voiceProfile.service.getEmbeddingsForUsers`'ı kendi içinde (bir hop ötede)
+ * require eder. Bu projede `vi.mock` sadece TEST DOSYASININ DOĞRUDAN import
+ * ettiği modülleri yakalar — bir hop ötedeki iç require() zincirine görünmez
+ * (bkz. `tests/unit/voiceProfile.test.js` ve
+ * `tests/unit/kioskService.recordTimeoutRead.test.js`'teki aynı, ampirik
+ * olarak doğrulanmış gerekçe). Bu yüzden burada da Node'un kendi
+ * `require.cache`'ine (native `createRequire` ile) sahte exports enjekte
+ * edilip `RealSpeakerVerifier.js` taze (`delete cache[...]` sonrası) require
+ * edilir — aynı teknik, aynı sebep.
+ */
+const nodeRequire = createRequire(import.meta.url);
+const here = path.dirname(fileURLToPath(import.meta.url));
+const speakerIdClientPath = path.resolve(here, '../../src/services/speakerIdClient.js');
+const voiceProfileServicePath = path.resolve(here, '../../src/services/voiceProfile.service.js');
+const realSpeakerVerifierPath = path.resolve(here, '../../src/drivers/RealSpeakerVerifier.js');
+
+describe('RealSpeakerVerifier.identify', () => {
+  let fakeGetEmbedding;
+  let fakeGetEmbeddingsForUsers;
+  let RealSpeakerVerifier;
+
+  beforeEach(() => {
+    fakeGetEmbedding = vi.fn();
+    fakeGetEmbeddingsForUsers = vi.fn();
+
+    nodeRequire.cache[speakerIdClientPath] = {
+      id: speakerIdClientPath,
+      filename: speakerIdClientPath,
+      loaded: true,
+      exports: { getEmbedding: fakeGetEmbedding },
+    };
+    nodeRequire.cache[voiceProfileServicePath] = {
+      id: voiceProfileServicePath,
+      filename: voiceProfileServicePath,
+      loaded: true,
+      exports: { getEmbeddingsForUsers: fakeGetEmbeddingsForUsers },
+    };
+    delete nodeRequire.cache[realSpeakerVerifierPath]; // force fresh require so it picks up the injected deps
+
+    ({ RealSpeakerVerifier } = nodeRequire(realSpeakerVerifierPath));
+  });
+
+  it("en yüksek cosine-similarity skoru eşik üstündeyse o userId'yi confidence ile döner", async () => {
+    fakeGetEmbedding.mockResolvedValue([1, 0]);
+    fakeGetEmbeddingsForUsers.mockResolvedValue([
+      { userId: 'u1', embedding: [1, 0] }, // cosine sim = 1
+      { userId: 'u2', embedding: [0, 1] }, // cosine sim = 0
+    ]);
+
+    const verifier = new RealSpeakerVerifier();
+    const result = await verifier.identify('audio-base64', ['u1', 'u2'], {});
+
+    expect(result).toEqual({ userId: 'u1', confidence: 1 });
+    expect(fakeGetEmbeddingsForUsers).toHaveBeenCalledWith(['u1', 'u2']);
+  });
+
+  it("en yüksek skor eşik altındaysa null döner (false-accept'e düşmez)", async () => {
+    fakeGetEmbedding.mockResolvedValue([1, 0]);
+    fakeGetEmbeddingsForUsers.mockResolvedValue([
+      { userId: 'u1', embedding: [0, 1] }, // cosine sim = 0
+      { userId: 'u2', embedding: [-1, 0] }, // cosine sim = -1 (açıkça eşleşmeyen)
+    ]);
+
+    const verifier = new RealSpeakerVerifier();
+    const result = await verifier.identify('audio-base64', ['u1', 'u2'], {});
+
+    expect(result).toBeNull();
+  });
+
+  it('audioBuffer null ise (ses yok) fırlatmadan null döner', async () => {
+    const verifier = new RealSpeakerVerifier();
+    await expect(verifier.identify(null, ['u1'], {})).resolves.toBeNull();
+    expect(fakeGetEmbedding).not.toHaveBeenCalled();
+  });
+
+  it('candidateUserIds boşsa null döner', async () => {
+    const verifier = new RealSpeakerVerifier();
+    await expect(verifier.identify('audio', [], {})).resolves.toBeNull();
+    expect(fakeGetEmbedding).not.toHaveBeenCalled();
+  });
+
+  it('getEmbeddingsForUsers hiçbir eşleşme döndürmezse (kimse enroll olmamış) null döner', async () => {
+    fakeGetEmbedding.mockResolvedValue([1, 0]);
+    fakeGetEmbeddingsForUsers.mockResolvedValue([]);
+
+    const verifier = new RealSpeakerVerifier();
+    const result = await verifier.identify('audio-base64', ['u1', 'u2'], {});
+
+    expect(result).toBeNull();
+  });
+
+  it('getEmbedding null dönerse (ses/konuşma tespit edilemedi) fırlatmadan null döner, getEmbeddingsForUsers çağrılmaz', async () => {
+    fakeGetEmbedding.mockResolvedValue(null);
+
+    const verifier = new RealSpeakerVerifier();
+    const result = await verifier.identify('audio-base64', ['u1'], {});
+
+    expect(result).toBeNull();
+    expect(fakeGetEmbeddingsForUsers).not.toHaveBeenCalled();
+  });
+
+  // --- Review follow-up fixes (Important #1 ve #2) ---
+
+  it('getEmbeddingsForUsers reddederse (DB bağlantısı düşerse/timeout) fırlatmadan null döner', async () => {
+    fakeGetEmbedding.mockResolvedValue([1, 0]);
+    fakeGetEmbeddingsForUsers.mockRejectedValue(new Error('ECONNREFUSED'));
+
+    const verifier = new RealSpeakerVerifier();
+    await expect(verifier.identify('audio-base64', ['u1', 'u2'], {})).resolves.toBeNull();
+  });
+
+  it('getEmbedding reddederse (savunma-derinliği) fırlatmadan null döner', async () => {
+    fakeGetEmbedding.mockRejectedValue(new Error('network down'));
+
+    const verifier = new RealSpeakerVerifier();
+    await expect(verifier.identify('audio-base64', ['u1'], {})).resolves.toBeNull();
+    expect(fakeGetEmbeddingsForUsers).not.toHaveBeenCalled();
+  });
+
+  it('kayıtlı embedding uzunluğu sorgu embedding\'inden farklıysa (model-version uyuşmazlığı) NaN confidence\'lı sahte bir eşleşme DÖNDÜRMEZ, null döner', async () => {
+    // query 3 boyutlu, u1'in kayıtlı profili 2 boyutlu (eski model_version'dan kalmış,
+    // yeniden enroll edilmemiş) — dot()'un `undefined` ile çarpıp NaN üretebileceği senaryo.
+    fakeGetEmbedding.mockResolvedValue([1, 0, 0]);
+    fakeGetEmbeddingsForUsers.mockResolvedValue([
+      { userId: 'u1', embedding: [1, 0] },
+    ]);
+
+    const verifier = new RealSpeakerVerifier();
+    const result = await verifier.identify('audio-base64', ['u1'], {});
+
+    expect(result).toBeNull();
+  });
+
+  it("final whole-branch review finding #7: ilk aday NaN skor üretirse (bozuk kayıtlı veri — embedding içinde bir NaN elemanı), listede SONRAKİ geçerli/eşleşen bir aday hâlâ kazanır", async () => {
+    // [NaN, 0] uzunlukça query ile EŞİT olduğu için cosineSimilarity'nin
+    // uzunluk-uyuşmazlığı koruması bunu yakalamaz; dot/norm NaN'a yayılır.
+    // Fix öncesi: `score > best.score` (best.score=NaN) HER ZAMAN false
+    // olduğundan best, u-corrupt'tan asla u-valid'e güncellenmezdi.
+    fakeGetEmbedding.mockResolvedValue([1, 0]);
+    fakeGetEmbeddingsForUsers.mockResolvedValue([
+      { userId: 'u-corrupt', embedding: [NaN, 0] },
+      { userId: 'u-valid', embedding: [1, 0] }, // cosine sim = 1
+    ]);
+
+    const verifier = new RealSpeakerVerifier();
+    const result = await verifier.identify('audio-base64', ['u-corrupt', 'u-valid'], {});
+
+    expect(result).toEqual({ userId: 'u-valid', confidence: 1 });
+  });
+
+  it('uzunluk uyuşmazlığı olan aday varken, uzunluğu TUTAN başka bir aday eşik üstündeyse o aday normal şekilde döner', async () => {
+    // Review Focus: uzunluk-uyuşmazlığı koruması diğer adayların normal değerlendirilmesini bozmamalı.
+    fakeGetEmbedding.mockResolvedValue([1, 0]);
+    fakeGetEmbeddingsForUsers.mockResolvedValue([
+      { userId: 'u1', embedding: [1, 0, 0] }, // uzunluk uyuşmazlığı → 0 (eşleşme yok)
+      { userId: 'u2', embedding: [1, 0] }, // tam eşleşme → 1
+    ]);
+
+    const verifier = new RealSpeakerVerifier();
+    const result = await verifier.identify('audio-base64', ['u1', 'u2'], {});
+
+    expect(result).toEqual({ userId: 'u2', confidence: 1 });
+  });
+});

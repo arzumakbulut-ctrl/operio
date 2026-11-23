@@ -178,13 +178,18 @@ const deviceConfigSchema = z.object({
 });
 
 // ── KİOSK (Sesli Asistan) ────────────────────────────────────
+// 'real' dahil — kiosk_mock_config.mode CHECK kısıtı (migrations/001_init.sql)
+// bu 5 değeri kabul eder; final whole-branch review finding #2: 'real' burada
+// eksikti, bu yüzden admin PUT /mock-config 'real'i zod'da 400 ile reddediyordu
+// (gerçek mod sadece elle SQL ile açılabiliyordu).
 const mockConfigSchema = z.object({
-  mode: z.enum(['always_match', 'always_reject_team', 'always_unrecognized', 'cycle']),
+  mode: z.enum(['always_match', 'always_reject_team', 'always_unrecognized', 'cycle', 'real']),
 });
 
-// confirmationPhrase BİLEREK optional: Task 6 (TIMEOUT/UNKNOWN) bunu kullanmaz, ama
-// Task 7'nin cihaz-komutu onay akışı (DEVICE_COMMAND'ın ikinci çağrısı) bu alanı
-// gönderecek — şema şimdiden buna izin veriyor ki ileride gevşetme ihtiyacı doğmasın.
+// confirmationAnswer BİLEREK optional: Task 6 (TIMEOUT/UNKNOWN) bunu kullanmaz, ama
+// cihaz-komutu onay akışının (DEVICE_COMMAND'ın ikinci çağrısı) doğal dil evet/hayır
+// cevabı bu alanda gelir — şema şimdiden buna izin veriyor ki ileride gevşetme
+// ihtiyacı doğmasın.
 const kioskVoiceCommandSchema = z.object({
   transcript: z.string(),
   // audio null/eksik olabilir: kiosk istemcisi henüz bir MediaRecorder parçası yokken
@@ -192,7 +197,7 @@ const kioskVoiceCommandSchema = z.object({
   // TIMEOUT sese hiç ihtiyaç duymaz; konuşmacı-tanıma gereken dallarda null ses
   // kioskSpeakerAuth → SpeakerVerifier'a "örnek yok" olarak geçer (bkz. kioskSpeakerAuth).
   audio: z.string().nullable().optional(),
-  confirmationPhrase: z.string().optional(),
+  confirmationAnswer: z.string().optional(),
 });
 
 // ── SAYFALAMA ────────────────────────────────────────────────
