@@ -138,6 +138,23 @@ describe('RealSpeakerVerifier.identify', () => {
     expect(result).toBeNull();
   });
 
+  it("final whole-branch review finding #7: ilk aday NaN skor üretirse (bozuk kayıtlı veri — embedding içinde bir NaN elemanı), listede SONRAKİ geçerli/eşleşen bir aday hâlâ kazanır", async () => {
+    // [NaN, 0] uzunlukça query ile EŞİT olduğu için cosineSimilarity'nin
+    // uzunluk-uyuşmazlığı koruması bunu yakalamaz; dot/norm NaN'a yayılır.
+    // Fix öncesi: `score > best.score` (best.score=NaN) HER ZAMAN false
+    // olduğundan best, u-corrupt'tan asla u-valid'e güncellenmezdi.
+    fakeGetEmbedding.mockResolvedValue([1, 0]);
+    fakeGetEmbeddingsForUsers.mockResolvedValue([
+      { userId: 'u-corrupt', embedding: [NaN, 0] },
+      { userId: 'u-valid', embedding: [1, 0] }, // cosine sim = 1
+    ]);
+
+    const verifier = new RealSpeakerVerifier();
+    const result = await verifier.identify('audio-base64', ['u-corrupt', 'u-valid'], {});
+
+    expect(result).toEqual({ userId: 'u-valid', confidence: 1 });
+  });
+
   it('uzunluk uyuşmazlığı olan aday varken, uzunluğu TUTAN başka bir aday eşik üstündeyse o aday normal şekilde döner', async () => {
     // Review Focus: uzunluk-uyuşmazlığı koruması diğer adayların normal değerlendirilmesini bozmamalı.
     fakeGetEmbedding.mockResolvedValue([1, 0]);

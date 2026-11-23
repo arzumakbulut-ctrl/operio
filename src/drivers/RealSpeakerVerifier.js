@@ -118,6 +118,17 @@ class RealSpeakerVerifier extends SpeakerVerifier {
     let best = null;
     for (const { userId, embedding } of enrolled) {
       const score = cosineSimilarity(queryEmbedding, embedding);
+      // Final whole-branch review finding #7: cosineSimilarity uzunluk-
+      // uyuşmazlığı/sıfır-norm'u zaten 0'a indirger, ama BOZUK kayıtlı veri
+      // (örn. embedding içinde bir NaN elemanı — uzunluk EŞİT olduğu için
+      // yukarıdaki korumalardan hiçbirine çarpmaz) hâlâ NaN bir skor
+      // üretebilir. Bu aday listede İLK sıradaysa, `score > best.score`
+      // karşılaştırması `best.score` NaN olduğu için HER ZAMAN false
+      // değerlendirilir — yani best, bu bozuk adaydan bir SONRAKİ (geçerli/
+      // eşleşen) adaya asla güncellenmezdi. Bu adayı `continue` ile
+      // tamamen ATLAYARAK, bozuk bir ilk aday sonraki meşru bir eşleşmeyi
+      // asla bloke edemez.
+      if (!Number.isFinite(score)) continue;
       if (!best || score > best.score) {
         best = { userId, score };
       }
