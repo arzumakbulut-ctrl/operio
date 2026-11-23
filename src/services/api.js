@@ -188,6 +188,7 @@ export const sterileSetsAPI = {
   create:      (body) => post('/sterile-sets', body).then(r => r.data),
   update:      (id, body) => patch(`/sterile-sets/${id}`, body).then(r => r.data),
   addTracking: (id, body) => post(`/sterile-sets/${id}/tracking`, body).then(r => r.data),
+  visionCount: (id, body) => post(`/sterile-sets/${id}/vision-count`, body).then(r => r.data),
 };
 
 // ── DENETİM GÜNLÜĞÜ ─────────────────────────────────────────

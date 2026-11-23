@@ -1,6 +1,67 @@
-import { useState, useRef } from 'react';
-import { useDataStore, useUIStore } from '../store';
+import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useDataStore, useUIStore, useAuthStore } from '../store';
 import Modal from '../components/ui/Modal';
+import { sterileSetsAPI, moduleAPI } from '../services/api';
+
+// ── AI ile fotoğrafla sayım — görsel sıkıştırma ─────────────────
+// Fotoğraf, canvas'a çizilip maks. 1280px genişliğe indirilir ve JPEG
+// kalite ~0.7 ile sıkıştırılır (mobil kamera fotoğrafları birkaç MB
+// olabilir — backend'e tüm çözünürlüğü göndermemek için).
+//
+// Test ortamı (jsdom) gerçek canvas çizimini desteklemiyor —
+// HTMLCanvasElement.getContext('2d') burada her zaman null döner ve
+// <img>'in onload/onerror olayı HİÇ tetiklenmez (bir zaman aşımına
+// güvenmek yerine burada senkron feature-detect ile atlanıyor). Bu
+// yüzden önce bir "prob" canvas ile gerçek 2D context mevcut mu diye
+// bakılıyor; yoksa (test ortamı) ham (sıkıştırılmamış) base64 ile
+// devam ediliyor — gerçek tarayıcılarda bu dal hiç çalışmaz.
+const VISION_MAX_WIDTH = 1280;
+const VISION_JPEG_QUALITY = 0.7;
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result || ''));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function compressImageFile(file) {
+  const fallbackMediaType = (file?.type && file.type.startsWith('image/')) ? file.type : 'image/jpeg';
+
+  return readFileAsDataUrl(file).then((dataUrl) => {
+    const rawBase64 = dataUrl.split(',')[1] || '';
+
+    const probe = document.createElement('canvas');
+    const probeCtx = probe.getContext && probe.getContext('2d');
+    if (!probeCtx) {
+      // Canvas çizimi desteklenmiyor (test ortamı) — sıkıştırmadan gönder.
+      return { imageBase64: rawBase64, mediaType: fallbackMediaType };
+    }
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const scale = Math.min(1, VISION_MAX_WIDTH / (img.width || VISION_MAX_WIDTH));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round((img.width || VISION_MAX_WIDTH) * scale));
+          canvas.height = Math.max(1, Math.round((img.height || VISION_MAX_WIDTH) * scale));
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          const jpegDataUrl = canvas.toDataURL('image/jpeg', VISION_JPEG_QUALITY);
+          resolve({ imageBase64: jpegDataUrl.split(',')[1] || rawBase64, mediaType: 'image/jpeg' });
+        } catch {
+          resolve({ imageBase64: rawBase64, mediaType: fallbackMediaType });
+        }
+      };
+      img.onerror = () => resolve({ imageBase64: rawBase64, mediaType: fallbackMediaType });
+      img.src = dataUrl;
+    });
+  }).catch(() => ({ imageBase64: '', mediaType: fallbackMediaType }));
+}
 
 const AKIS_ASAMALARI = [
   { key:'kirli_teslim',    lbl:'Kirli Teslim Alma',   icon:'📦', desc:'QR okutarak alet sayımı yap',          renk:'#DC2626' },
@@ -13,27 +74,226 @@ const AKIS_ASAMALARI = [
 function SayimModal({ setId, onClose }) {
   const { sterilSetlerV2, sterilAkis, sterilAkisGecis, updateSterilAkis } = useDataStore();
   const { showToast } = useUIStore();
+  const { curRole } = useAuthStore();
+  const navigate = useNavigate();
   const s = sterilSetlerV2.find(x => x.id === setId);
   const akis = sterilAkis[setId] || { gercekSayim: {} };
-  const [sayimlar, setSayimlar] = useState(() =>
-    (s?.aletler || []).reduce((o, _, i) => { o[i] = akis.gercekSayim[i] ?? 1; return o; }, {})
-  );
+  // Task 1-4'ün hazırladığı 6 seed setinde backendSetId mevcut — bu dal onlar
+  // için SayimModal'ı gerçek /sterile-sets backend'ine bağlar. backendSetId
+  // olmayan tüm diğer setler (ve ileride eklenecek yeni mock setler) eski,
+  // tamamen yerel/mock davranışına AYNEN devam eder.
+  const hasBackend = Boolean(s?.backendSetId);
+  // Gerçek enstrüman listesi yüklenemezse (404, ağ hatası, 500…) modal bu
+  // oturum boyunca eski mock dalına düşer — sayım akışı kilitlenmesin diye.
+  const [backendFailed, setBackendFailed] = useState(false);
+  // Bu modalın gerçek backend dalını kullanıp kullanmadığı. hasBackend yalnızca
+  // "setin backendSetId'si var mı"yı söyler; useReal ise fetch başarısız
+  // olduğunda false'a döner ve tüm render/kaydet mantığı buna bakar.
+  const useReal = hasBackend && !backendFailed;
+
+  // Gerçek backend dalı: API'den gelen enstrüman listesi. null = henüz yüklenmedi.
+  const [realInstruments, setRealInstruments] = useState(null);
+  const [sayimlar, setSayimlar] = useState(() => {
+    if (hasBackend) return {};
+    return (s?.aletler || []).reduce((o, _, i) => { o[i] = akis.gercekSayim[i] ?? 1; return o; }, {});
+  });
   const [teslimEden, setTeslimEden] = useState('');
   const [salon, setSalon] = useState('');
   const [notlar, setNotlar] = useState('');
+  const [kaydediliyor, setKaydediliyor] = useState(false);
+
+  // AI ile fotoğrafla sayım — modül-gated CTA + yakalama akışı.
+  // null = henüz kontrol edilmedi (moduleAPI.mine() dönmedi), true/false = kesin durum.
+  const [visionActive, setVisionActive] = useState(null);
+  const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const fileInputRef = useRef(null);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  // getUserMedia() beklenirken modal kapanırsa, sonradan çözülen akışı
+  // hemen durdurabilmek için (sızan kamera olmasın).
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    if (!hasBackend) return;
+    let aktif = true;
+    sterileSetsAPI.get(s.backendSetId).then((data) => {
+      if (!aktif) return;
+      const instruments = data?.instruments || [];
+      setRealInstruments(instruments);
+      setSayimlar(instruments.reduce((o, ins) => { o[ins.id] = ins.expected_count; return o; }, {}));
+    }).catch((e) => {
+      if (!aktif) return;
+      // Gerçek veri alınamadı — kalıcı "yükleniyor" kilidi yerine eski mock
+      // dalına (index-anahtarlı sayaçlar, sadece mock-store kaydı, AI yok) düş.
+      setBackendFailed(true);
+      setSayimlar((s?.aletler || []).reduce((o, _, i) => { o[i] = akis.gercekSayim[i] ?? 1; return o; }, {}));
+      showToast('Alet listesi sunucudan yüklenemedi' + (e?.message ? ' (' + e.message + ')' : '') + ' — yerel listeyle devam ediliyor');
+    });
+    return () => { aktif = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasBackend, s?.backendSetId]);
+
+  useEffect(() => {
+    if (!hasBackend) return;
+    let aktif = true;
+    moduleAPI.mine().then((mods) => {
+      if (!aktif) return;
+      const list = Array.isArray(mods) ? mods : [];
+      setVisionActive(list.some((m) => m?.slug === 'vision_counting'));
+    }).catch(() => { if (aktif) setVisionActive(false); });
+    return () => { aktif = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasBackend, s?.backendSetId]);
+
+  // Modal kapanırken açık kamera akışı varsa bırak — arka planda çalışan
+  // bir kamera cihazı sızdırılmasın.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+    };
+  }, []);
+
+  // <video> yalnızca cameraOpen true olduktan sonra mount ediliyor — akışı
+  // ancak o render'dan sonra (bu effect'te) bağlayabiliriz; startCamera
+  // içinde senkron atama yapıldığında videoRef.current henüz null'dı.
+  useEffect(() => {
+    if (cameraOpen && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+    }
+  }, [cameraOpen]);
+
+  function stopCamera() {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    setCameraOpen(false);
+  }
+
+  async function startCamera() {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      showToast('Bu cihazda kamera erişimi desteklenmiyor');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      if (!mountedRef.current) {
+        // Modal izin beklenirken kapandı — akışı hemen bırak.
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      streamRef.current = stream;
+      // srcObject ataması cameraOpen effect'inde, <video> mount olduktan sonra yapılır.
+      setCameraOpen(true);
+    } catch {
+      if (mountedRef.current) showToast('Kameraya erişilemedi');
+    }
+  }
+
+  function captureFromCamera() {
+    const video = videoRef.current;
+    if (!video) return;
+    // Henüz gerçek bir kare yoksa (akış bağlanmadı / ilk kare gelmedi) boş
+    // bir görüntüyü AI'a göndermeyelim — sıfır önerilerle sayaçları bozar.
+    if (!(video.videoWidth > 0) || !(video.videoHeight > 0)) {
+      showToast('Kamera görüntüsü henüz hazır değil, lütfen bir saniye bekleyin');
+      return;
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { showToast('Kamera görüntüsü yakalanamadı'); return; }
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => { if (blob) handleImageCaptured(blob); }, 'image/jpeg', 0.9);
+    stopCamera();
+  }
+
+  async function handleImageCaptured(fileOrBlob) {
+    if (!fileOrBlob) return;
+    setAiBusy(true);
+    try {
+      const { imageBase64, mediaType } = await compressImageFile(fileOrBlob);
+      const result = await sterileSetsAPI.visionCount(s.backendSetId, { imageBase64, mediaType });
+      if (result?.parsed) {
+        const updates = {};
+        (result.suggestions || []).forEach((sug) => {
+          if (sug?.detectedCount != null) updates[sug.instrumentId] = sug.detectedCount;
+        });
+        setSayimlar(p => ({ ...p, ...updates }));
+      } else {
+        showToast('AI sayamadı, lütfen elle sayın');
+      }
+    } catch (e) {
+      showToast('Fotoğraf analiz edilemedi' + (e?.message ? ': ' + e.message : ''));
+    } finally {
+      setAiBusy(false);
+      setPhotoMenuOpen(false);
+    }
+  }
+
+  function handleFileInputChange(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (file) handleImageCaptured(file);
+  }
 
   if (!s) return null;
 
-  function degistir(idx, delta) {
-    setSayimlar(p => ({ ...p, [idx]: Math.max(0, (p[idx] ?? 1) + delta) }));
+  function degistir(key, delta, varsayilan = 1) {
+    setSayimlar(p => ({ ...p, [key]: Math.max(0, (p[key] ?? varsayilan) + delta) }));
   }
 
-  function kaydet() {
+  // Backend dalında, gerçek enstrüman listesi henüz yüklenmeden (GET devam
+  // ederken) kaydet() tetiklenirse realInstruments hâlâ null olur — bu
+  // durumda counts:[] gönderilip tamMi yanlışlıkla true olurdu. Bu yüzden
+  // hem kaydet() hem de gönder butonu bu pencerede devre dışı bırakılır.
+  const yukleniyor = useReal && realInstruments === null;
+
+  async function kaydet() {
+    if (kaydediliyor) return;
+    if (yukleniyor) { showToast('Aletler yükleniyor, lütfen bekleyin'); return; }
     if (!teslimEden.trim()) { showToast('Teslim eden personeli girin'); return; }
     if (!salon) { showToast('Salon seçin'); return; }
-    const tamMi = s.aletler.every((_, i) => (sayimlar[i] ?? 1) >= 1);
     const now = new Date();
     const saat = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+
+    let tamMi;
+    if (useReal) {
+      const instruments = realInstruments || [];
+      tamMi = instruments.every(ins => (sayimlar[ins.id] ?? 0) >= ins.expected_count);
+      setKaydediliyor(true);
+      try {
+        await sterileSetsAPI.addTracking(s.backendSetId, {
+          stage: 'teslim_alindi',
+          operator: teslimEden,
+          notes: notlar,
+          counts: instruments.map(ins => ({ instrumentId: ins.id, count: sayimlar[ins.id] })),
+        });
+      } catch (e) {
+        // Kayıt başarısız — başarı toast'ı gösterme, akışı ilerletme, modalı
+        // açık bırak ki kullanıcı tekrar deneyebilsin.
+        if (mountedRef.current) setKaydediliyor(false);
+        showToast('Sayım kaydedilemedi' + (e?.message ? ': ' + e.message : '') + ' — lütfen tekrar deneyin');
+        return;
+      }
+      // Yalnızca bu bileşenin React state'i mount'a bağlı. Aşağıdaki store
+      // senkronu/toast, kullanıcı kayıt sürerken "İptal"e bassa bile
+      // (bileşen unmount olmuş olsa bile) backend'in onayladığı kayıt için
+      // MUTLAKA çalışmalı — aksi halde onaylanmış teslim sessizce kaybolur.
+      if (mountedRef.current) setKaydediliyor(false);
+    } else {
+      tamMi = s.aletler.every((_, i) => (sayimlar[i] ?? 1) >= 1);
+    }
+
+    // Görsel akış göstergesini ilerleten mock-store çağrıları — her iki dalda da AYNEN çalışır.
     updateSterilAkis(setId, {
       gercekSayim: sayimlar,
       zamanlar: { ...(akis.zamanlar || {}), kirli_teslim: saat + ' — Teslim alındı · ' + teslimEden },
@@ -43,8 +303,13 @@ function SayimModal({ setId, onClose }) {
     onClose();
   }
 
-  const tamSayisi = s.aletler.filter((_, i) => (sayimlar[i] ?? 1) === 1).length;
-  const eksiVar   = s.aletler.some((_, i) => (sayimlar[i] ?? 1) < 1);
+  const toplamAdet = useReal ? (realInstruments || []).length : s.aletler.length;
+  const tamSayisi = useReal
+    ? (realInstruments || []).filter(ins => (sayimlar[ins.id] ?? 0) === ins.expected_count).length
+    : s.aletler.filter((_, i) => (sayimlar[i] ?? 1) === 1).length;
+  const eksiVar = useReal
+    ? (realInstruments || []).some(ins => (sayimlar[ins.id] ?? 0) < ins.expected_count)
+    : s.aletler.some((_, i) => (sayimlar[i] ?? 1) < 1);
 
   return (
     <Modal title={`Alet Sayım Formu — ${s.name}`} onClose={onClose} width={560}>
@@ -59,10 +324,73 @@ function SayimModal({ setId, onClose }) {
         </div>
         <div style={{ flex:1 }}>
           <div style={{ fontSize:13, fontWeight:700, color:'var(--slate)' }}>{s.name}</div>
-          <div style={{ fontSize:11, color:'var(--slate-light)', marginTop:2 }}>{s.doktor} · Raf: {s.raf} · {s.aletler.length} alet</div>
+          <div style={{ fontSize:11, color:'var(--slate-light)', marginTop:2 }}>{s.doktor} · Raf: {s.raf} · {toplamAdet} alet</div>
         </div>
         <span className="tag t-red" style={{ fontSize:9 }}>Kirli Teslim</span>
       </div>
+
+      {/* AI ile fotoğrafla sayım — sadece gerçek backend setlerinde, aletler
+          yüklendikten (yukleniyor) sonra ve modül satın alınmışsa gösterilir. */}
+      {useReal && !yukleniyor && visionActive === false && (
+        <div className="empty" style={{ marginBottom:14, padding:'16px 14px' }}>
+          <div className="empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width:22, height:22 }}>
+              <rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7l1.5-3h5L16 7"/><circle cx="12" cy="13.5" r="3.5"/>
+            </svg>
+          </div>
+          <div className="empty-text">Görsel Alet Sayımı modülü bu kurum için aktif değil.</div>
+          {curRole === 0 && (
+            <button className="btn btn-primary btn-sm" onClick={() => navigate('/abonelik')}>
+              Abonelik sayfasına git →
+            </button>
+          )}
+        </div>
+      )}
+
+      {useReal && !yukleniyor && visionActive === true && (
+        <div style={{ marginBottom:14 }}>
+          {!photoMenuOpen ? (
+            <button type="button" className="btn btn-secondary" onClick={() => setPhotoMenuOpen(true)}>
+              📷 Fotoğrafla Say
+            </button>
+          ) : (
+            <div style={{ border:'1px solid var(--border)', borderRadius:10, padding:'12px 14px' }}>
+              <div style={{ fontSize:11, color:'var(--slate-mid)', marginBottom:10 }}>
+                AI ile aletleri say — fotoğraf yükleyin veya kamerayı kullanın. Öneriler sayaçları doldurur, siz hâlâ +/- ile düzeltebilirsiniz.
+              </div>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom: cameraOpen ? 10 : 0 }}>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={aiBusy} onClick={() => fileInputRef.current?.click()}>
+                  Dosyadan Yükle / Kamera
+                </button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={aiBusy} onClick={() => (cameraOpen ? stopCamera() : startCamera())}>
+                  {cameraOpen ? 'Canlı Kamerayı Kapat' : 'Canlı Kamera'}
+                </button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={aiBusy} onClick={() => { stopCamera(); setPhotoMenuOpen(false); }}>
+                  Kapat
+                </button>
+              </div>
+              <input
+                ref={fileInputRef}
+                data-testid="vision-photo-input"
+                type="file"
+                accept="image/*"
+                capture="environment"
+                style={{ display:'none' }}
+                onChange={handleFileInputChange}
+              />
+              {cameraOpen && (
+                <div className="qr-zone" style={{ padding:10 }}>
+                  <video ref={videoRef} autoPlay playsInline muted style={{ width:'100%', borderRadius:8, background:'#000' }} />
+                  <button type="button" className="btn btn-primary btn-sm" style={{ marginTop:8 }} disabled={aiBusy} onClick={captureFromCamera}>
+                    Çek
+                  </button>
+                </div>
+              )}
+              {aiBusy && <div role="status" aria-live="polite" style={{ fontSize:11, color:'var(--slate-light)', marginTop:8 }}>AI analiz ediyor…</div>}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Salon + teslim eden */}
       <div className="fr" style={{ marginBottom:12 }}>
@@ -84,7 +412,28 @@ function SayimModal({ setId, onClose }) {
             <span key={h} style={{ fontSize:9, fontWeight:700, color:'var(--slate-light)', textTransform:'uppercase', letterSpacing:'0.5px', textAlign:'center' }}>{h}</span>
           ))}
         </div>
-        {s.aletler.map((a, i) => {
+        {useReal ? (
+          realInstruments === null ? (
+            <div style={{ padding:'16px 12px', textAlign:'center', fontSize:12, color:'var(--slate-light)' }}>Aletler yükleniyor…</div>
+          ) : realInstruments.map((ins) => {
+            const say = sayimlar[ins.id] ?? ins.expected_count;
+            const ok = say === ins.expected_count; const fazla = say > ins.expected_count;
+            return (
+              <div key={ins.id} style={{ display:'grid', gridTemplateColumns:'1fr 72px 108px 52px', alignItems:'center', padding:'9px 12px', borderBottom:'1px solid var(--border)' }}>
+                <div style={{ fontSize:12, fontWeight:500, color:'var(--slate)' }}>{ins.name}</div>
+                <div style={{ textAlign:'center', fontSize:12, fontWeight:600, color:'var(--slate-mid)' }}>{ins.expected_count}</div>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:6 }}>
+                  <button type="button" className="cnt-btn" style={{ padding:0, fontFamily:"inherit" }} aria-label={`${ins.name} azalt`} onClick={() => degistir(ins.id, -1, ins.expected_count)}>−</button>
+                  <div data-testid={`sayim-value-${ins.id}`} className={`cnt-val ${ok?'cnt-ok':fazla?'cnt-fazla':'cnt-miss'}`} style={{ width:30, fontSize:13, fontWeight:800 }}>{say}</div>
+                  <button type="button" className="cnt-btn" style={{ padding:0, fontFamily:"inherit" }} aria-label={`${ins.name} arttır`} onClick={() => degistir(ins.id, 1, ins.expected_count)}>+</button>
+                </div>
+                <div style={{ textAlign:'center', fontSize:16 }}>
+                  {ok ? <span style={{ color:'var(--success)' }}>✓</span> : fazla ? <span style={{ color:'var(--warning)', fontSize:13 }}>↑</span> : <span style={{ color:'var(--danger)' }}>⚠</span>}
+                </div>
+              </div>
+            );
+          })
+        ) : s.aletler.map((a, i) => {
           const say = sayimlar[i] ?? 1;
           const ok = say === 1; const fazla = say > 1;
           return (
@@ -103,8 +452,8 @@ function SayimModal({ setId, onClose }) {
           );
         })}
         <div style={{ padding:'8px 12px', display:'flex', justifyContent:'space-between', background:'var(--surface)' }}>
-          <span style={{ fontSize:11, color:'var(--slate-mid)' }}>Toplam: <strong style={{ color:'var(--slate)' }}>{s.aletler.length} alet</strong></span>
-          <span style={{ fontSize:11, fontWeight:700, color: eksiVar ? 'var(--danger)' : 'var(--success)' }}>{tamSayisi}/{s.aletler.length} tam</span>
+          <span style={{ fontSize:11, color:'var(--slate-mid)' }}>Toplam: <strong style={{ color:'var(--slate)' }}>{toplamAdet} alet</strong></span>
+          <span style={{ fontSize:11, fontWeight:700, color: eksiVar ? 'var(--danger)' : 'var(--success)' }}>{tamSayisi}/{toplamAdet} tam</span>
         </div>
       </div>
 
@@ -115,7 +464,9 @@ function SayimModal({ setId, onClose }) {
 
       <div className="mf">
         <button className="btn btn-secondary" onClick={onClose}>İptal</button>
-        <button className="btn btn-primary" onClick={kaydet}>Sayımı Onayla & Teslim Al</button>
+        <button className="btn btn-primary" onClick={kaydet} disabled={yukleniyor || kaydediliyor} title={yukleniyor ? 'Aletler yükleniyor…' : undefined}>
+          {yukleniyor ? 'Aletler yükleniyor…' : kaydediliyor ? 'Kaydediliyor…' : 'Sayımı Onayla & Teslim Al'}
+        </button>
       </div>
     </Modal>
   );

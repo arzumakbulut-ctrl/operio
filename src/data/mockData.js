@@ -158,16 +158,22 @@ export const DURUM_SET_CFG = {
 
 export const STERIL_SETLER_V2 = [
   { id:1, name:'Laparoskopi Seti A', doktor:'Dr. Ahmet Yılmaz', raf:'A-1', durum:'Kullanımda',      color:'#14B8A6',
+    backendSetId:'10000000-0000-0000-0000-000000000001',
     aletler:[{ad:'Trokar 10mm',adet:1},{ad:'Trokar 5mm',adet:2},{ad:'Laparoskop 30°',adet:1},{ad:'Grasper',adet:1},{ad:'Koter Elektrotu',adet:1}] },
   { id:2, name:'Apendektomi Seti',   doktor:'Dr. Gigi Hadid',   raf:'A-2', durum:'Sterilizasyonda', color:'#0284C7',
+    backendSetId:'10000000-0000-0000-0000-000000000002',
     aletler:[{ad:'Endoloop',adet:2},{ad:'Trokar 5mm',adet:2},{ad:'Disektör',adet:1},{ad:'Grasper',adet:1}] },
   { id:3, name:'TDA Ortopedi Seti',  doktor:'Dr. Can Özkan',    raf:'B-1', durum:'Steril — Hazır',  color:'#7C3AED',
+    backendSetId:'10000000-0000-0000-0000-000000000003',
     aletler:[{ad:'Retraktör',adet:2},{ad:'Kemik Raspa',adet:1},{ad:'Osteotom',adet:3},{ad:'Turnike',adet:1},{ad:'Çimento Karıştırıcı',adet:1}] },
   { id:4, name:'Boyun Cerrahi Seti', doktor:'Dr. Ahmet Yılmaz', raf:'B-2', durum:'Steril — Hazır',  color:'#DC2626',
+    backendSetId:'10000000-0000-0000-0000-000000000004',
     aletler:[{ad:'Nöromonitor Prob',adet:1},{ad:'Retraktör',adet:2},{ad:'Disektör',adet:1},{ad:'Klip Aplikatörü',adet:1}] },
   { id:5, name:'Fakoemülsifikasyon', doktor:'Dr. Mert Akar',    raf:'C-1', durum:'Steril — Hazır',  color:'#EA580C',
+    backendSetId:'10000000-0000-0000-0000-000000000005',
     aletler:[{ad:'Fakoemülsifikatör',adet:1},{ad:'İrigasyon Kılıfı',adet:1},{ad:'Göz Spekülümü',adet:1},{ad:'BSS Kanülü',adet:2}] },
   { id:6, name:'Laparoskopi Seti B', doktor:'Dr. Gigi Hadid',   raf:'A-3', durum:'Steril — Hazır',  color:'#059669',
+    backendSetId:'10000000-0000-0000-0000-000000000006',
     aletler:[{ad:'Trokar 10mm',adet:1},{ad:'Trokar 5mm',adet:1},{ad:'Laparoskop 0°',adet:1},{ad:'Endoloop',adet:2}] },
 ];
 
