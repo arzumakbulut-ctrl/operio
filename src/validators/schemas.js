@@ -168,8 +168,12 @@ const deviceConfigSchema = z.object({
 });
 
 // ── KİOSK (Sesli Asistan) ────────────────────────────────────
+// 'real' dahil — kiosk_mock_config.mode CHECK kısıtı (migrations/001_init.sql)
+// bu 5 değeri kabul eder; final whole-branch review finding #2: 'real' burada
+// eksikti, bu yüzden admin PUT /mock-config 'real'i zod'da 400 ile reddediyordu
+// (gerçek mod sadece elle SQL ile açılabiliyordu).
 const mockConfigSchema = z.object({
-  mode: z.enum(['always_match', 'always_reject_team', 'always_unrecognized', 'cycle']),
+  mode: z.enum(['always_match', 'always_reject_team', 'always_unrecognized', 'cycle', 'real']),
 });
 
 // confirmationAnswer BİLEREK optional: Task 6 (TIMEOUT/UNKNOWN) bunu kullanmaz, ama
