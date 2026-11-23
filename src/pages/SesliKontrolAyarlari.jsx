@@ -9,6 +9,7 @@ const MOCK_MODES = [
   { value: 'always_reject_team',    label: 'Her Zaman Reddet (Ekipte Değil)' },
   { value: 'always_unrecognized',   label: 'Her Zaman Tanınmadı' },
   { value: 'cycle',                 label: 'Sırayla Değiştir' },
+  { value: 'real',                  label: 'Gerçek Speaker-ID' },
 ];
 
 // Şu an backend registry.js'te kayıtlı tek sürücü 'mock'; yeni sürücüler eklendiğinde

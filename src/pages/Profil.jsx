@@ -9,6 +9,14 @@ const SES_PASAJI = 'Operio ses profilimi oluşturuyorum, bu cümleyi kendi doğa
 // Kayıt otomatik olarak bu süre (ms) sonunda durur — basitlik için sabit süre tercih edildi
 // (kullanıcının elle durdurması yerine); 5 saniye tek cümlelik pasaj için yeterli.
 const KAYIT_SURESI_MS = 5000;
+// Speaker-ID modeli daha güvenilir bir ses profili için birden fazla örnek bekliyor —
+// aynı pasaj art arda bu kadar kez okutulup tek bir enroll() çağrısında gönderiliyor.
+const KAYIT_ADIM_SAYISI = 3;
+// Final review Finding 4: kayıtlar arasında kısa bir duraklama — kullanıcıya
+// pasajı YENİDEN okuması için görünür bir "hazırlanın" penceresi verir. Bu
+// olmadan kullanıcı pasajı sadece 1. kayıtta okuyup 2. ve 3. kayıtlarda sessiz
+// kalma eğiliminde oluyor (enrollment embedding'inin ortalamasını bozar).
+const KAYIT_ARASI_BEKLEME_MS = 500;
 
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
@@ -32,7 +40,11 @@ export default function Profil() {
 
   // Ses profili (konuşmacı doğrulama kaydı)
   const [sesProfili, setSesProfili] = useState(null);
-  const [kayitYapiliyor, setKayitYapiliyor] = useState(false);
+  // 0 = kayıt akışı başlamadı; 1..KAYIT_ADIM_SAYISI = o anda aktif olan kayıt adımı.
+  const [kayitAdimi, setKayitAdimi] = useState(0);
+  // Finding 4: kayıtlar arası kısa duraklama sırasında true — kullanıcıya pasajı
+  // tekrar okumaya hazırlanması için görünür bir ipucu/metin gösterir.
+  const [kayitArasiBekleniyor, setKayitArasiBekleniyor] = useState(false);
   const [kayitGonderiliyor, setKayitGonderiliyor] = useState(false);
   const recorderRef = useRef(null);
   const kayitTimeoutRef = useRef(null);
@@ -100,43 +112,77 @@ export default function Profil() {
     }
   }
 
+  // Tek bir kayıt döngüsü: mikrofon izni ister, pasajı KAYIT_SURESI_MS süresince
+  // kaydeder ve kaydın base64'ünü döndürür. Mevcut MediaRecorder/getUserMedia
+  // mekanizması değişmedi — sesKaydiBaslat artık bunu 3 kez art arda çağırıyor.
+  function birKayitYap() {
+    return new Promise((resolve, reject) => {
+      // Final review Finding 5: kiosk'un useVoiceDeviceControl.js'teki doğrulama
+      // yakalaması ile aynı gürültü/eko kısıtları — enrollment ve doğrulama
+      // sesinin kalitesi tutarlı olsun diye (ikisi de aynı modele besleniyor).
+      navigator.mediaDevices.getUserMedia({ audio: { noiseSuppression: true, echoCancellation: true } }).then((stream) => {
+        const chunks = [];
+        const recorder = new MediaRecorder(stream);
+        recorderRef.current = recorder;
+
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) chunks.push(e.data);
+        };
+
+        recorder.onstop = async () => {
+          stream.getTracks().forEach(t => t.stop());
+          try {
+            const blob = new Blob(chunks, { type: 'audio/webm' });
+            const base64 = await blobToBase64(blob);
+            resolve(base64);
+          } catch (err) {
+            reject(err);
+          }
+        };
+
+        recorder.start();
+        kayitTimeoutRef.current = setTimeout(() => {
+          if (recorderRef.current && recorderRef.current.state === 'recording') {
+            recorderRef.current.stop();
+          }
+        }, KAYIT_SURESI_MS);
+      }).catch(reject);
+    });
+  }
+
   async function sesKaydiBaslat() {
+    const audioBase64Array = [];
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const chunks = [];
-      const recorder = new MediaRecorder(stream);
-      recorderRef.current = recorder;
-
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunks.push(e.data);
-      };
-
-      recorder.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        setKayitYapiliyor(false);
-        setKayitGonderiliyor(true);
-        try {
-          const blob = new Blob(chunks, { type: 'audio/webm' });
-          const base64 = await blobToBase64(blob);
-          const profil = await voiceProfileAPI.enroll(base64);
-          setSesProfili(profil);
-          showToast('Ses profiliniz oluşturuldu');
-        } catch (err) {
-          showToast('Ses profili kaydedilemedi, lütfen tekrar deneyin');
-        } finally {
-          setKayitGonderiliyor(false);
+      for (let adim = 1; adim <= KAYIT_ADIM_SAYISI; adim++) {
+        if (adim > 1) {
+          // Finding 4: bir sonraki kayda hemen geçmek yerine kısa bir duraklama —
+          // kullanıcı bu pencerede pasajı tekrar okumaya hazırlanabilir, aksi
+          // halde sessiz kalıp sadece ilk kaydı dolduruyor.
+          setKayitArasiBekleniyor(true);
+          await new Promise((resolve) => setTimeout(resolve, KAYIT_ARASI_BEKLEME_MS));
+          setKayitArasiBekleniyor(false);
         }
-      };
-
-      recorder.start();
-      setKayitYapiliyor(true);
-      kayitTimeoutRef.current = setTimeout(() => {
-        if (recorderRef.current && recorderRef.current.state === 'recording') {
-          recorderRef.current.stop();
-        }
-      }, KAYIT_SURESI_MS);
+        setKayitAdimi(adim);
+        const base64 = await birKayitYap();
+        audioBase64Array.push(base64);
+      }
     } catch (err) {
+      setKayitAdimi(0);
+      setKayitArasiBekleniyor(false);
       showToast('Mikrofon izni verilmedi');
+      return;
+    }
+
+    setKayitAdimi(0);
+    setKayitGonderiliyor(true);
+    try {
+      const profil = await voiceProfileAPI.enroll(audioBase64Array);
+      setSesProfili(profil);
+      showToast('Ses profiliniz oluşturuldu');
+    } catch (err) {
+      showToast('Ses profili kaydedilemedi, lütfen tekrar deneyin');
+    } finally {
+      setKayitGonderiliyor(false);
     }
   }
 
@@ -303,29 +349,45 @@ export default function Profil() {
                   <div style={{ fontSize:11, color:'var(--slate-light)', marginTop:4 }}>
                     Kayıt tarihi: {new Date(sesProfili.enrolledAt).toLocaleDateString('tr-TR')}
                   </div>
+                  <div style={{ fontSize:12, color:'var(--slate-light)', lineHeight:1.5, marginTop:10 }}>
+                    Yeniden kaydederken aşağıdaki cümleyi <strong>3 kez</strong>, her seferinde kendi doğal konuşma hızınızla okuyacaksınız:
+                  </div>
+                  <div style={{ fontSize:12.5, color:'var(--slate)', fontWeight:600, fontStyle:'italic', margin:'8px 0 12px', padding:'10px 12px', background:'var(--surface)', borderRadius:8, border:'1px solid var(--border)' }}>
+                    "{SES_PASAJI}"
+                  </div>
+                  {kayitArasiBekleniyor && (
+                    <div style={{ fontSize:11.5, color:'#059669', fontWeight:600, marginBottom:10 }}>
+                      Hazır olun, cümleyi tekrar okuyun...
+                    </div>
+                  )}
                   <button
                     className="btn btn-secondary"
                     style={{ marginTop:12 }}
-                    disabled={kayitYapiliyor || kayitGonderiliyor}
+                    disabled={kayitAdimi > 0 || kayitGonderiliyor || kayitArasiBekleniyor}
                     onClick={sesKaydiBaslat}
                   >
-                    {kayitYapiliyor ? 'Kaydediliyor...' : kayitGonderiliyor ? 'Gönderiliyor...' : 'Yeniden Kaydet'}
+                    {kayitArasiBekleniyor ? 'Tekrar okuyun...' : kayitAdimi > 0 ? `Kayıt ${kayitAdimi}/${KAYIT_ADIM_SAYISI}...` : kayitGonderiliyor ? 'Gönderiliyor...' : 'Yeniden Kaydet'}
                   </button>
                 </>
               ) : (
                 <>
                   <div style={{ fontSize:12, color:'var(--slate-light)', lineHeight:1.5 }}>
-                    Ses profili oluşturmak için aşağıdaki cümleyi kendi doğal konuşma hızınızla okuyun:
+                    Ses profili oluşturmak için aşağıdaki cümleyi <strong>3 kez</strong>, her seferinde kendi doğal konuşma hızınızla okuyacaksınız. Her kayıttan sonra kısa bir duraklama olacak — o sırada cümleyi tekrar okumaya hazırlanın:
                   </div>
                   <div style={{ fontSize:12.5, color:'var(--slate)', fontWeight:600, fontStyle:'italic', margin:'8px 0 12px', padding:'10px 12px', background:'var(--surface)', borderRadius:8, border:'1px solid var(--border)' }}>
                     "{SES_PASAJI}"
                   </div>
+                  {kayitArasiBekleniyor && (
+                    <div style={{ fontSize:11.5, color:'#059669', fontWeight:600, marginBottom:10 }}>
+                      Hazır olun, cümleyi tekrar okuyun...
+                    </div>
+                  )}
                   <button
                     className="btn btn-secondary"
-                    disabled={kayitYapiliyor || kayitGonderiliyor}
+                    disabled={kayitAdimi > 0 || kayitGonderiliyor || kayitArasiBekleniyor}
                     onClick={sesKaydiBaslat}
                   >
-                    {kayitYapiliyor ? 'Kaydediliyor...' : kayitGonderiliyor ? 'Gönderiliyor...' : 'Kayda Başla'}
+                    {kayitArasiBekleniyor ? 'Tekrar okuyun...' : kayitAdimi > 0 ? `Kayıt ${kayitAdimi}/${KAYIT_ADIM_SAYISI}...` : kayitGonderiliyor ? 'Gönderiliyor...' : 'Kayda Başla'}
                   </button>
                 </>
               )}

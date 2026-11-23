@@ -37,10 +37,16 @@ class MockMediaRecorder {
     this.stream = stream;
     this.state = 'inactive';
     this.ondataavailable = null;
+    this.onstop = null;
     mediaRecorderInstances.push(this);
   }
   start() { this.state = 'recording'; }
-  stop() { this.state = 'inactive'; }
+  stop() {
+    this.state = 'inactive';
+    // Gerçek MediaRecorder.stop() 'stop' olayını tetikler; Task 1'deki
+    // döngü-başı taze MediaRecorder mantığı bu callback'e bağlı.
+    if (this.onstop) this.onstop();
+  }
 }
 
 function finalResult(transcript) {
@@ -187,7 +193,7 @@ describe('Kiosk sayfası', () => {
     expect(await screen.findByText(/Sizi dinleyemedim\..*Tekrar deneyin\./)).toBeInTheDocument();
   });
 
-  it('MediaRecorder ondataavailable ile dolan son ses chunk\'ı base64\'e kodlanıp voiceCommand\'a "audio" olarak uçtan uca iletilir', async () => {
+  it('bir döngünün tamamlanmış (biriktirilmiş) MediaRecorder chunk\'ları base64\'e kodlanıp voiceCommand\'a "audio" olarak uçtan uca iletilir', async () => {
     kioskAPI.status.mockResolvedValueOnce({ active: true, surgeryId: 's1' });
     kioskAPI.voiceCommand.mockResolvedValueOnce({ type: 'DEVICE_COMMAND', say: 'Koter açıldı' });
 
@@ -197,15 +203,18 @@ describe('Kiosk sayfası', () => {
     await waitFor(() => expect(mediaRecorderInstances.length).toBe(1));
 
     const recorder = mediaRecorderInstances[0];
-    // İlk parça tampon tarafından tutulur, ikincisi ÜZERİNE YAZAR (ring buffer, biriktirmez).
+    // Task 1 (döngü-başı taze MediaRecorder): aynı döngü içindeki chunk'lar
+    // BİRİKTİRİLİR (overwrite edilmez) ve döngü recorder.stop()/onstop ile
+    // bittiğinde tek bir blob'a birleştirilir.
     act(() => { recorder.ondataavailable({ data: new Blob(['ilk-parca'], { type: 'audio/webm' }) }); });
     act(() => { recorder.ondataavailable({ data: new Blob(['son-parca'], { type: 'audio/webm' }) }); });
+    act(() => { recorder.stop(); });
 
     act(() => { recognitionInstances[0].onresult(finalResult('Operio koteri aç')); });
 
     await waitFor(() => expect(kioskAPI.voiceCommand).toHaveBeenCalledTimes(1));
     const [, , body] = kioskAPI.voiceCommand.mock.calls[0];
     expect(typeof body.audio).toBe('string');
-    expect(atob(body.audio)).toBe('son-parca');
+    expect(atob(body.audio)).toBe('ilk-parcason-parca');
   });
 });

@@ -96,4 +96,13 @@ describe('SesliKontrolAyarlari — Konuşmacı Doğrulama (Demo)', () => {
     fireEvent.change(select, { target: { value: 'cycle' } });
     await waitFor(() => expect(kioskAdminAPI.setMockConfig).toHaveBeenCalledWith('cycle'));
   });
+
+  it('doğrulama senaryosu seçicisinde "Gerçek Speaker-ID" seçeneği vardır ve seçildiğinde setMockConfig(\'real\') çağrılır', async () => {
+    const { kioskAdminAPI } = await import('../../src/services/api.js');
+
+    render(<SesliKontrolAyarlari />);
+    const select = await screen.findByLabelText(/doğrulama senaryosu/i);
+    fireEvent.change(select, { target: { value: 'real' } });
+    await waitFor(() => expect(kioskAdminAPI.setMockConfig).toHaveBeenCalledWith('real'));
+  });
 });

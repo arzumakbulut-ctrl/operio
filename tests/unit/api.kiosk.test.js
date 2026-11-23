@@ -15,7 +15,7 @@ describe('kioskAPI', () => {
     await kioskAPI.voiceCommand('room1', 'kiosk-tok-abc', {
       transcript: 'ışıkları aç',
       audio: null,
-      confirmationPhrase: null,
+      confirmationAnswer: null,
     });
 
     expect(global.fetch).toHaveBeenCalledWith(
@@ -23,7 +23,7 @@ describe('kioskAPI', () => {
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({ Authorization: 'Bearer kiosk-tok-abc' }),
-        body: JSON.stringify({ transcript: 'ışıkları aç', audio: null, confirmationPhrase: null }),
+        body: JSON.stringify({ transcript: 'ışıkları aç', audio: null, confirmationAnswer: null }),
       })
     );
   });
@@ -50,7 +50,7 @@ describe('kioskAPI', () => {
     await kioskAPI.voiceCommand('room1', 'REAL-KIOSK-TOKEN', {
       transcript: 'merhaba',
       audio: null,
-      confirmationPhrase: null,
+      confirmationAnswer: null,
     });
 
     const [, opts] = global.fetch.mock.calls[0];
@@ -88,15 +88,15 @@ describe('voiceProfileAPI', () => {
     });
   });
 
-  it('enroll() doğru endpoint ve body ile POST atmalı (kişisel JWT)', async () => {
+  it('enroll() bir diziyi audioSamples alanında POST atmalı (kişisel JWT)', async () => {
     const { voiceProfileAPI } = await import('../../src/services/api.js');
-    await voiceProfileAPI.enroll('base64audiodata');
+    await voiceProfileAPI.enroll(['sample1', 'sample2', 'sample3']);
 
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining('/profile/voice-enrollment'),
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ audio: 'base64audiodata' }),
+        body: JSON.stringify({ audioSamples: ['sample1', 'sample2', 'sample3'] }),
       })
     );
   });

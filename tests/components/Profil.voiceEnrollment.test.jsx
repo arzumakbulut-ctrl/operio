@@ -18,6 +18,33 @@ beforeEach(() => {
   useUIStore.setState({ toastMsg: '', toastVisible: false });
 });
 
+// Ortak MediaRecorder/getUserMedia mock kurulumu — her testte aynı sahte kayıt
+// mekanizmasını kurmak için tekrar yazılmasın diye paylaşılan yardımcı.
+function mockMediaKayit({ getUserMediaImpl } = {}) {
+  const recorderInstances = [];
+  class MockMediaRecorder {
+    constructor(stream) {
+      this.stream = stream;
+      this.state = 'inactive';
+      recorderInstances.push(this);
+    }
+    start() { this.state = 'recording'; }
+    stop() {
+      if (this.state !== 'recording') return;
+      this.state = 'inactive';
+      this.ondataavailable && this.ondataavailable({ data: new Blob(['x'], { type: 'audio/webm' }) });
+      this.onstop && this.onstop();
+    }
+  }
+  vi.stubGlobal('MediaRecorder', MockMediaRecorder);
+
+  const fakeStream = { getTracks: () => [{ stop: vi.fn() }] };
+  const getUserMedia = getUserMediaImpl || vi.fn().mockResolvedValue(fakeStream);
+  vi.stubGlobal('navigator', { ...navigator, mediaDevices: { getUserMedia } });
+
+  return { recorderInstances, getUserMedia };
+}
+
 describe('Profil — Ses Profili bölümü', () => {
   it('kayıt yoksa (get() null) "Kayda Başla" butonu ve sabit pasaj metni görünür, "Yeniden Kaydet" görünmez', async () => {
     const { voiceProfileAPI } = await import('../../src/services/api.js');
@@ -41,50 +68,162 @@ describe('Profil — Ses Profili bölümü', () => {
     expect(screen.queryByRole('button', { name: /^kayda başla$/i })).not.toBeInTheDocument();
   });
 
-  it('"Kayda Başla" tıklanınca mikrofon izni istenir, kayıt başlar ve kayıt bitince enroll() çağrılıp başarı toast\'ı gösterilir', async () => {
+  it('final review Finding 4: "Yeniden Kaydet" dalında da sabit pasaj metni ve "3 kez" okuma talimatı gösterilir (önceden hiç gösterilmiyordu)', async () => {
+    const { voiceProfileAPI } = await import('../../src/services/api.js');
+    voiceProfileAPI.get.mockResolvedValueOnce({ modelVersion: 'v1', enrolledAt: '2026-11-20T10:00:00Z' });
+
+    render(<Profil />);
+
+    expect(await screen.findByRole('button', { name: /yeniden kaydet/i })).toBeInTheDocument();
+    expect(screen.getByText(/Operio ses profilimi oluşturuyorum, bu cümleyi kendi doğal konuşma hızımla okuyorum\./i)).toBeInTheDocument();
+    expect(screen.getByText(/3 kez/i)).toBeInTheDocument();
+  });
+
+  it('final review Finding 4: "Kayda Başla" dalındaki talimat metni artık pasajın 1 kez değil 3 KEZ okunacağını belirtir', async () => {
     const { voiceProfileAPI } = await import('../../src/services/api.js');
     voiceProfileAPI.get.mockResolvedValueOnce(null);
 
-    const recorderInstances = [];
-    class MockMediaRecorder {
-      constructor(stream) {
-        this.stream = stream;
-        this.state = 'inactive';
-        recorderInstances.push(this);
-      }
-      start() { this.state = 'recording'; }
-      stop() {
-        if (this.state !== 'recording') return;
-        this.state = 'inactive';
-        this.ondataavailable && this.ondataavailable({ data: new Blob(['x'], { type: 'audio/webm' }) });
-        this.onstop && this.onstop();
-      }
-    }
-    vi.stubGlobal('MediaRecorder', MockMediaRecorder);
+    render(<Profil />);
 
-    const fakeStream = { getTracks: () => [{ stop: vi.fn() }] };
-    const getUserMedia = vi.fn().mockResolvedValue(fakeStream);
-    vi.stubGlobal('navigator', { ...navigator, mediaDevices: { getUserMedia } });
+    expect(await screen.findByRole('button', { name: /kayda başla/i })).toBeInTheDocument();
+    expect(screen.getByText(/3 kez/i)).toBeInTheDocument();
+  });
+
+  it('"Kayda Başla" tıklanınca 3 ardışık kayıt yapar ve tek bir enroll çağrısında 3 elemanlı dizi gönderir', async () => {
+    const { voiceProfileAPI } = await import('../../src/services/api.js');
+    voiceProfileAPI.get.mockResolvedValueOnce(null);
+
+    const { recorderInstances, getUserMedia } = mockMediaKayit();
 
     render(<Profil />);
     fireEvent.click(await screen.findByRole('button', { name: /kayda başla/i }));
 
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalledWith({ audio: true }));
-    await waitFor(() => expect(recorderInstances.length).toBe(1));
-    expect(recorderInstances[0].state).toBe('recording');
-
-    // Kaydın (sabit süreli ya da elle durdurulan) bittiğini simüle et.
-    recorderInstances[0].stop();
+    for (let i = 1; i <= 3; i++) {
+      await waitFor(() => expect(recorderInstances.length).toBe(i));
+      expect(recorderInstances[i - 1].state).toBe('recording');
+      recorderInstances[i - 1].stop();
+    }
 
     await waitFor(() => expect(voiceProfileAPI.enroll).toHaveBeenCalledTimes(1));
-    expect(voiceProfileAPI.enroll).toHaveBeenCalledWith(expect.any(String));
+    expect(voiceProfileAPI.enroll).toHaveBeenCalledWith([
+      expect.any(String), expect.any(String), expect.any(String),
+    ]);
+    expect(getUserMedia).toHaveBeenCalledTimes(3);
 
     await waitFor(() => expect(screen.getByRole('button', { name: /yeniden kaydet/i })).toBeInTheDocument());
     expect(await screen.findByText(/ses profiliniz oluşturuldu/i)).toBeInTheDocument();
     expect(useUIStore.getState().toastVisible).toBe(true);
   });
 
-  it('mikrofon izni reddedilirse çökmeden hata toast\'ı gösterilir ve "Kayda Başla" tekrar kullanılabilir olur', async () => {
+  it('kayıt sırasında "Kayıt N/3" ilerleme göstergesi render edilir', async () => {
+    const { voiceProfileAPI } = await import('../../src/services/api.js');
+    voiceProfileAPI.get.mockResolvedValueOnce(null);
+
+    const { recorderInstances } = mockMediaKayit();
+
+    render(<Profil />);
+    fireEvent.click(await screen.findByRole('button', { name: /kayda başla/i }));
+
+    await waitFor(() => expect(recorderInstances.length).toBe(1));
+    expect(await screen.findByRole('button', { name: /1\/3/ })).toBeInTheDocument();
+    recorderInstances[0].stop();
+
+    await waitFor(() => expect(recorderInstances.length).toBe(2));
+    expect(await screen.findByRole('button', { name: /2\/3/ })).toBeInTheDocument();
+    recorderInstances[1].stop();
+
+    await waitFor(() => expect(recorderInstances.length).toBe(3));
+    recorderInstances[2].stop();
+
+    await waitFor(() => expect(voiceProfileAPI.enroll).toHaveBeenCalledTimes(1));
+  });
+
+  it('final review Finding 5: getUserMedia noiseSuppression ve echoCancellation ile çağrılır (kiosk\'un doğrulama yakalamasıyla tutarlı)', async () => {
+    const { voiceProfileAPI } = await import('../../src/services/api.js');
+    voiceProfileAPI.get.mockResolvedValueOnce(null);
+
+    const { recorderInstances, getUserMedia } = mockMediaKayit();
+
+    render(<Profil />);
+    fireEvent.click(await screen.findByRole('button', { name: /kayda başla/i }));
+
+    await waitFor(() => expect(recorderInstances.length).toBe(1));
+    const [constraints] = getUserMedia.mock.calls[0];
+    expect(constraints.audio.noiseSuppression).toBe(true);
+    expect(constraints.audio.echoCancellation).toBe(true);
+
+    recorderInstances[0].stop();
+    await waitFor(() => expect(recorderInstances.length).toBe(2));
+    recorderInstances[1].stop();
+    await waitFor(() => expect(recorderInstances.length).toBe(3));
+    recorderInstances[2].stop();
+    await waitFor(() => expect(voiceProfileAPI.enroll).toHaveBeenCalledTimes(1));
+  });
+
+  it('final review Finding 4: kayıtlar arasında "tekrar okuyun" ipucu gösterilir ve bir sonraki kayıt duraklama bitmeden BAŞLAMAZ', async () => {
+    // Bu test GERÇEK zamanlayıcılarla çalışır (kısa KAYIT_ARASI_BEKLEME_MS=500ms
+    // üretim gecikmesi gerçekten geçer) — fake timers + testing-library DOM
+    // polling'inin (screen.getByText + waitFor) birbiriyle çakışmasından
+    // kaçınmak için; 500ms, testing-library'nin varsayılan waitFor zaman
+    // aşımından (1000ms) kısa olduğu için akış hızlı ve deterministik kalır.
+    const { voiceProfileAPI } = await import('../../src/services/api.js');
+    voiceProfileAPI.get.mockResolvedValueOnce(null);
+
+    const { recorderInstances } = mockMediaKayit();
+
+    render(<Profil />);
+    const btn = await screen.findByRole('button', { name: /kayda başla/i });
+    fireEvent.click(btn);
+
+    await waitFor(() => expect(recorderInstances.length).toBe(1));
+    recorderInstances[0].stop();
+
+    // 1. kayıt bitti: 2. kayıt başlamadan önce "tekrar okuyun" ipucu gösterilmeli
+    // VE henüz 2. kayıt (yeni MediaRecorder örneği) başlamamış olmalı. Not: metin
+    // "Hazır olun, ..." hem duraklama ipucu div'inde HEM DE (farklı sözcüklerle)
+    // buton metninde "tekrar okuyun" geçtiği için /tekrar okuyun/i regex'i İKİ
+    // elementle eşleşip getByText'i "multiple elements" ile patlatır — bu yüzden
+    // SADECE ipucu div'ine özgü "Hazır olun" ifadesini arıyoruz.
+    await waitFor(() => expect(screen.getByText(/hazır olun/i)).toBeInTheDocument(), { timeout: 3000 });
+    expect(recorderInstances.length).toBe(1);
+
+    await waitFor(() => expect(recorderInstances.length).toBe(2), { timeout: 3000 });
+    expect(screen.queryByText(/hazır olun/i)).not.toBeInTheDocument();
+    recorderInstances[1].stop();
+
+    await waitFor(() => expect(screen.getByText(/hazır olun/i)).toBeInTheDocument(), { timeout: 3000 });
+    expect(recorderInstances.length).toBe(2);
+    await waitFor(() => expect(recorderInstances.length).toBe(3), { timeout: 3000 });
+    recorderInstances[2].stop();
+
+    await waitFor(() => expect(voiceProfileAPI.enroll).toHaveBeenCalledTimes(1));
+  });
+
+  it('3 kayıttan biri sırasında mikrofon hatası olursa süreç baştan başlar, kısmi dizi gönderilmez', async () => {
+    const { voiceProfileAPI } = await import('../../src/services/api.js');
+    voiceProfileAPI.get.mockResolvedValueOnce(null);
+
+    const fakeStream = { getTracks: () => [{ stop: vi.fn() }] };
+    const getUserMediaImpl = vi.fn()
+      .mockResolvedValueOnce(fakeStream)
+      .mockRejectedValueOnce(new DOMException('Permission denied', 'NotAllowedError'));
+    const { recorderInstances } = mockMediaKayit({ getUserMediaImpl });
+
+    render(<Profil />);
+    const btn = await screen.findByRole('button', { name: /kayda başla/i });
+    fireEvent.click(btn);
+
+    await waitFor(() => expect(recorderInstances.length).toBe(1));
+    recorderInstances[0].stop();
+
+    await waitFor(() => expect(getUserMediaImpl).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(useUIStore.getState().toastVisible).toBe(true));
+
+    expect(voiceProfileAPI.enroll).not.toHaveBeenCalled();
+    expect(await screen.findByRole('button', { name: /kayda başla/i })).not.toBeDisabled();
+  });
+
+  it('mikrofon izni ilk kayıtta reddedilirse çökmeden hata toast\'ı gösterilir ve "Kayda Başla" tekrar kullanılabilir olur', async () => {
     const { voiceProfileAPI } = await import('../../src/services/api.js');
     voiceProfileAPI.get.mockResolvedValueOnce(null);
 
