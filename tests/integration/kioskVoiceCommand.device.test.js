@@ -65,7 +65,9 @@ describe('POST /api/kiosk/rooms/:roomId/voice-command — DEVICE_COMMAND', () =>
     // Artık rakam-bazlı bir phrase alanı YOK — soru addressSpeaker (hitap) +
     // describeDeviceAction (eylem açıklaması) ile doğal dilde kurulur.
     expect(res.body.data.phrase).toBeUndefined();
-    expect(res.body.data.say).toBe('Ayşe hocam, koteri açmamı, doğru mu?');
+    // Final whole-branch review finding #6: "istiyorsunuz" eklendi (eski metin
+    // dilbilgisel olarak eksikti — tasarım dokümanının örneğiyle hizalandı).
+    expect(res.body.data.say).toBe('Ayşe hocam, koteri açmamı istiyorsunuz, doğru mu?');
     expect(mockDeviceService.executeCommand).not.toHaveBeenCalled();
   });
 

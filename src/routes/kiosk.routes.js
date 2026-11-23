@@ -208,7 +208,8 @@ const CONFIRMATION_MISMATCH_BODY = {
  * - DEVICE_COMMAND (Task 7, ilk çağrı): kioskSpeakerAuth'tan geçer (req.speaker doldurulur),
  *   eylem türetilir, hedef cihaz bulunur ve kioskConfirmation.service'te konuşmacıya bağlı
  *   bir bekleyen onay (20sn TTL) oluşturulup addressSpeaker+describeDeviceAction'dan kurulu
- *   doğal bir soru ("{Ad} [hocam], {eylem}, doğru mu?") döner (Task 9 — artık rakam YOK).
+ *   doğal bir soru ("{Ad} [hocam], {eylem} istiyorsunuz, doğru mu?") döner (Task 9 — artık
+ *   rakam YOK; final whole-branch review finding #6 — "istiyorsunuz" yüklemi eklendi).
  * - SPOTIFY_PLAY (Task 9): DEVICE_COMMAND gibi kioskSpeakerAuth'tan manuel geçer, AMA
  *   DEVICE_COMMAND'ın aksine TEK adımda sonuçlanır — sesli onay döngüsüne (confirmationAnswer/
  *   createPendingConfirmation) HİÇ girmez. Sırasıyla: transcript'ten sorgu çıkarılır
@@ -357,7 +358,11 @@ router.post(
           value: derived.value,
           initiatingUserId: req.speaker.userId,
         });
-        const say = `${addressSpeaker(req.speaker)}, ${describeDeviceAction(groupKeyword, derived.action, derived.value)}, doğru mu?`;
+        // "istiyorsunuz" EKLENDİ (final whole-branch review finding #6) — eski
+        // metin dilbilgisel olarak eksikti ("...koteri açmamı, doğru mu?",
+        // yüklemsiz); tasarım dokümanının kendi örneği
+        // ("...yapmamı istiyorsunuz, doğru mu?") ile hizalandı.
+        const say = `${addressSpeaker(req.speaker)}, ${describeDeviceAction(groupKeyword, derived.action, derived.value)} istiyorsunuz, doğru mu?`;
         return ok(res, {
           type: 'DEVICE_COMMAND',
           status: 'pending_confirmation',
