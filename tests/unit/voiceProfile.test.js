@@ -176,9 +176,11 @@ describe('voiceProfile.service — gerçek embedding', () => {
 
       const result = await getEmbeddingsForUsers(['u1', 'u2', 'u3-not-enrolled']);
 
+      // model_version = $2 filtresi de sorguya dahil (bkz. aşağıdaki finding
+      // #4 testi) — ikinci parametre artık MODEL_VERSION'ı taşıyor.
       expect(fakeQuery).toHaveBeenCalledWith(
         expect.stringContaining('ANY($1)'),
-        [['u1', 'u2', 'u3-not-enrolled']]
+        [['u1', 'u2', 'u3-not-enrolled'], MODEL_VERSION]
       );
       expect(result).toEqual([
         { userId: 'u1', embedding: [1, 1] },
@@ -190,6 +192,27 @@ describe('voiceProfile.service — gerçek embedding', () => {
     it('hiçbir userId enroll edilmemişse boş dizi döner', async () => {
       fakeQuery.mockResolvedValueOnce({ rows: [] });
       expect(await getEmbeddingsForUsers(['x', 'y'])).toEqual([]);
+    });
+
+    it("final whole-branch review finding #4: farklı (stale) bir model_version ile enroll olmuş bir kullanıcı, hiç enroll olmamış gibi sonuçtan hariç tutulur", async () => {
+      // Önceden bu sorgu model_version'dan bağımsız HER enrollment'ı
+      // döndürüyordu — eski mock-v1 hash'lerin karşılaştırmaya girmemesi
+      // sadece RealSpeakerVerifier'ın uzunluk-uyuşmazlığı korumasına
+      // TESADÜFEN bağlıydı. Artık WHERE'e `model_version = $2` eklendi;
+      // burada gerçek DB filtrelemesini simüle ediyoruz (mock sorgu sadece
+      // güncel model_version'a sahip satırı döndürür) ve SQL metninin +
+      // parametrelerin bu filtreyi GERÇEKTEN taşıdığını doğruluyoruz.
+      fakeQuery.mockResolvedValueOnce({
+        rows: [{ user_id: 'u1', embedding: serializeEmbedding([1, 1]) }],
+      });
+
+      const result = await getEmbeddingsForUsers(['u1', 'u-stale-model-version']);
+
+      const [sql, params] = fakeQuery.mock.calls[0];
+      expect(sql).toMatch(/model_version\s*=\s*\$2/);
+      expect(params).toEqual([['u1', 'u-stale-model-version'], MODEL_VERSION]);
+      expect(result).toEqual([{ userId: 'u1', embedding: [1, 1] }]);
+      expect(result.find((r) => r.userId === 'u-stale-model-version')).toBeUndefined();
     });
   });
 

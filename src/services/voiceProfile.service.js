@@ -142,13 +142,23 @@ async function getVoiceProfile(userId) {
  * getirir (RealSpeakerVerifier'ın karşılaştırma adımında kullanılması için).
  * Enrollment'ı olmayan userId'ler dönen dizide YOKTUR — dizi sadece kayıtlı
  * (enroll edilmiş) kullanıcıları içerir.
+ *
+ * model_version = MODEL_VERSION filtresi (final whole-branch review finding
+ * #4): öncesinde bu sorgu, model_version'dan BAĞIMSIZ her enrollment'ı
+ * döndürüyordu; eski mock-v1 hash'lerin karşılaştırmaya hiç girmemesi sadece
+ * RealSpeakerVerifier'ın uzunluk-uyuşmazlığı korumasına (farklı byte
+ * uzunluğu) TESADÜFEN bağlıydı — tasarım değil. Bu filtre, aynı boyutlu AMA
+ * uyumsuz bir embedding uzayına sahip GELECEKTEKİ bir model sürümüne karşı da
+ * koruma sağlar: sadece GÜNCEL model_version'a sahip satırlar döner, farklı
+ * (stale) bir model_version'la enroll olmuş bir kullanıcı, hiç enroll
+ * olmamış gibi sonuçtan hariç tutulur.
  * @param {string[]} userIds
  * @returns {Promise<Array<{ userId: string, embedding: number[] }>>}
  */
 async function getEmbeddingsForUsers(userIds) {
   const { rows } = await db.query(
-    'SELECT user_id, embedding FROM voice_profiles WHERE user_id = ANY($1)',
-    [userIds]
+    'SELECT user_id, embedding FROM voice_profiles WHERE user_id = ANY($1) AND model_version = $2',
+    [userIds, MODEL_VERSION]
   );
   return rows.map((row) => ({
     userId: row.user_id,
