@@ -43,3 +43,13 @@ def test_embed_rejects_valid_base64_that_is_not_audio():
     resp = client.post("/embed", json={"audio_base64": garbage_b64, "mime_type": "audio/webm"})
     assert resp.status_code == 400
     assert resp.json()["error"] == "decode_failed"
+
+
+def test_health_returns_ok_once_model_loaded():
+    # Modül import zamanında _load_classifier() zaten çağrıldığı için (bkz.
+    # app.py), test ortamında bu endpoint'e gelindiğinde model zaten yüklü
+    # olmalı (final whole-branch review finding #3 — docker-compose
+    # healthcheck'in dayandığı sözleşme).
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}

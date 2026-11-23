@@ -70,6 +70,23 @@ class EmbedRequest(BaseModel):
     mime_type: str
 
 
+@app.get("/health")
+def health():
+    """Final whole-branch review finding #3: operatörlerin konteyner
+    orkestrasyonu (docker-compose healthcheck) servisin GERÇEKTEN hazır
+    olduğunu -- modelin import zamanında başarıyla yüklendiğini -- tespit
+    edebilmesi için basit bir 200 OK uç noktası. Mevcut modül-seviyesi
+    `_classifier` durumu (bkz. `_load_classifier` docstring'i) tekrar
+    kullanılır; yeni bir bayrak/durum eklenmez. Model henüz yüklenmemişse
+    (örn. `_load_classifier()` import zamanında fırlatıp başlatmayı
+    durdurduysa -- normalde FastAPI zaten ayağa kalkmaz, ama savunma
+    amaçlı) 503 döner.
+    """
+    if _classifier is None:
+        return JSONResponse(status_code=503, content={"status": "loading"})
+    return {"status": "ok"}
+
+
 def _decode_audio(audio_base64: str) -> AudioSegment:
     """Base64 ses verisini decode eder ve bir pydub AudioSegment'e çevirir.
 
