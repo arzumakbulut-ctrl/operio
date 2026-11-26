@@ -8,9 +8,9 @@
  * Çıktıdaki id'yi .env dosyasına DESIGNER_USER_ID olarak ekleyin.
  * Bu script uygulama tarafından çağrılmaz.
  */
+const authService = require('../src/services/auth.service');
+
 async function provisionDesignerAccount({ email, password, fullName }) {
-  // Dinamik import: vi.mock() yalnızca import() yoluyla yüklenen modülü yakalar.
-  const authService = await import('../src/services/auth.service.js');
   const user = await authService.register({
     email,
     password,
