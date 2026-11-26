@@ -4,7 +4,7 @@ import registry from '../../src/services/_registry.js';
 
 const require = createRequire(import.meta.url);
 const { RealSpeakerVerifier } = require('../../src/drivers/RealSpeakerVerifier.js');
-const { GREETING_POOL, pickDesignerGreeting, isDesignerSpeaking } =
+const { GREETING_POOL, pickDesignerGreeting, isDesignerSpeaking, DESIGNER_CHECK_BUDGET_MS } =
   require('../../src/utils/designerGreeting.js');
 
 const mockKioskService = { getMockConfig: vi.fn() };
@@ -25,6 +25,7 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.DESIGNER_USER_ID;
+  vi.useRealTimers();
 });
 
 describe('pickDesignerGreeting', () => {
@@ -102,5 +103,62 @@ describe('isDesignerSpeaking', () => {
     const result = await isDesignerSpeaking(makeReq());
 
     expect(result).toBe(false);
+  });
+
+  // final whole-branch review Finding #1: UNKNOWN her utterance'ta çalıştığı
+  // için isDesignerSpeaking'in kendi iç işi (config lookup + identify)
+  // DESIGNER_CHECK_BUDGET_MS'lik bir üst sınıra karşı race edilmeli.
+  describe('DESIGNER_CHECK_BUDGET_MS üst sınırı', () => {
+    it('iç iş budget içinde (anında) biterse sonuç ETKİLENMEZ — true hâlâ döner', async () => {
+      vi.useFakeTimers();
+      process.env.DESIGNER_USER_ID = 'designer-1';
+      mockKioskService.getMockConfig.mockResolvedValueOnce({ mode: 'real' });
+      const spy = vi
+        .spyOn(RealSpeakerVerifier.prototype, 'identify')
+        .mockResolvedValueOnce({ userId: 'designer-1', confidence: 0.9 });
+
+      // Fake timer'ları ilerletmeden (budget setTimeout'u hiç ateşlenmeden)
+      // sadece mikrotask'larla çözülen hızlı yol hâlâ doğru sonucu vermeli.
+      const result = await isDesignerSpeaking(makeReq());
+
+      expect(result).toBe(true);
+      spy.mockRestore();
+    });
+
+    it('iç iş budget içinde (anında) biterse false sonucu da ETKİLENMEZ', async () => {
+      vi.useFakeTimers();
+      process.env.DESIGNER_USER_ID = 'designer-1';
+      mockKioskService.getMockConfig.mockResolvedValueOnce({ mode: 'real' });
+      const spy = vi.spyOn(RealSpeakerVerifier.prototype, 'identify').mockResolvedValueOnce(null);
+
+      const result = await isDesignerSpeaking(makeReq());
+
+      expect(result).toBe(false);
+      spy.mockRestore();
+    });
+
+    it('iç iş budget süresinden UZUN sürerse budget sınırında false döner, tüm süre beklenmez', async () => {
+      vi.useFakeTimers();
+      process.env.DESIGNER_USER_ID = 'designer-1';
+      // getMockConfig, budget'ın çok üzerinde bir sürede çözülüyor (5000ms) —
+      // speakerIdClient'ın gerçek SPEAKER_ID_TIMEOUT_MS'inin (varsayılan
+      // 3000ms) temsili bir stand-in'i.
+      mockKioskService.getMockConfig.mockImplementationOnce(
+        () => new Promise((resolve) => setTimeout(() => resolve({ mode: 'real' }), 5000))
+      );
+
+      const promise = isDesignerSpeaking(makeReq());
+      let settled = false;
+      promise.then(() => { settled = true; });
+
+      // Budget'ın hemen altında: henüz çözülmemiş olmalı.
+      await vi.advanceTimersByTimeAsync(DESIGNER_CHECK_BUDGET_MS - 1);
+      expect(settled).toBe(false);
+
+      // Budget sınırına ulaşınca: false ile çözülmeli (5000ms'nin TAMAMI
+      // beklenmeden).
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await promise).toBe(false);
+    });
   });
 });
