@@ -13,6 +13,7 @@ const { createPendingConfirmation, resolvePendingConfirmation } = require('../se
 const { MockSpotifyPlaybackDriver } = require('../drivers/MockSpotifyPlaybackDriver');
 const { isClinicalQuestion } = require('../utils/clinicalQuestionClassifier');
 const { addressSpeaker, describeDeviceAction } = require('../utils/kioskAddressing');
+const { isDesignerSpeaking, pickDesignerGreeting } = require('../utils/designerGreeting');
 
 // Servis varsayılan olarak gerçek implementasyonu kullanır
 // Test ortamında mock inject edilebilir (device.routes.js'teki desenle aynı)
@@ -448,6 +449,16 @@ router.post(
         });
 
         return ok(res, { type: 'WEB_SEARCH', say: finalAnswer });
+      }
+
+      // Designer easter-egg: UNKNOWN'a ayrışan (komut/spotify/arama/time-out
+      // olmayan) serbest konuşmada, konuşmacı designer ise (gerçek Speaker-ID
+      // ile, sadece config.mode==='real' kurumlarda — bkz. designerGreeting.js)
+      // sabit komut akışına hiç girmeden bir karşılama döner. Bu bir
+      // "anlayamadım" değildir — streak sıfırlanır.
+      if (await isDesignerSpeaking(req)) {
+        UNKNOWN_STREAK.delete(req.kiosk.roomId);
+        return ok(res, { type: 'GREETING', say: pickDesignerGreeting() });
       }
 
       // UNKNOWN (parseIntent'in döndürdüğü tek diğer tip) — ardışık deneme sayısına
