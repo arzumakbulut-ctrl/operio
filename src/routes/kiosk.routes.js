@@ -228,7 +228,11 @@ const CONFIRMATION_MISMATCH_BODY = {
  *   ise yanıtın önüne doğrulanmamış-kaynak uyarısı eklenir → kiosk.service.
  *   recordWebSearch() ile audit'e SADECE soru+özet yazılır (audit() burada DOĞRUDAN
  *   çağrılmaz — bu projenin konvansiyonu, bkz. recordTimeoutRead).
- * - UNKNOWN (veya transcript < 3 karakter — bkz. parseIntent): sabit "Anlayamadım" yanıtı.
+ * - UNKNOWN (veya transcript < 3 karakter — bkz. parseIntent): önce isDesignerSpeaking(req)
+ *   ile best-effort bir designer kontrolü yapılır — eşleşirse NLU/komut akışına hiç
+ *   girilmeden `{type: 'GREETING', ...}` döner, ardışık-anlaşılamama sayacı sıfırlanır;
+ *   eşleşmezse (ya da kontrol başarısız olursa) sabit "Anlayamadım" yanıtı değişmeden
+ *   devam eder (bkz. designerGreeting.js).
  */
 router.post(
   '/rooms/:roomId/voice-command',

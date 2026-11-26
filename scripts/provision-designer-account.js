@@ -1,13 +1,16 @@
 /**
  * Tek seferlik provisioning: "designer" (patron) hesabını oluşturur.
  *
- * Kullanım (operatör, bir kez, manuel):
- *   DESIGNER_EMAIL=... DESIGNER_PASSWORD=... DESIGNER_FULL_NAME=... \
- *     node scripts/provision-designer-account.js
+ * Kullanım (operatör, bir kez, manuel): DESIGNER_EMAIL, DESIGNER_PASSWORD ve
+ * DESIGNER_FULL_NAME'i geçici, gitignore'lu bir .env dosyasında veya kısa
+ * ömürlü bir shell oturumunda ayarlayın — şifreyi doğrudan komut satırına
+ * yazmaktan kaçının (shell geçmişinde düz metin olarak kalır), sonra:
+ *   node scripts/provision-designer-account.js
  *
  * Çıktıdaki id'yi .env dosyasına DESIGNER_USER_ID olarak ekleyin.
  * Bu script uygulama tarafından çağrılmaz.
  */
+require('dotenv').config();
 const authService = require('../src/services/auth.service');
 
 async function provisionDesignerAccount({ email, password, fullName }) {
@@ -34,6 +37,11 @@ async function main() {
 
   if (missing.length) {
     console.error('Eksik ortam değişkenleri: ' + missing.join(', '));
+    console.error(
+      'Bunları doğrudan komut satırına yazmayın (şifre shell geçmişinde kalır) — ' +
+      'geçici, gitignore\'lu bir .env dosyasında veya kısa ömürlü bir shell ' +
+      'oturumunda ayarlayıp script\'i tekrar çalıştırın.'
+    );
     process.exit(1);
   }
 
