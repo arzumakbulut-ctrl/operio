@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAuthStore, useUIStore, useDataStore } from '../store';
+import { listSurgeries } from '../services/surgeriesAdapter.js';
 
 const BASE = 'http://localhost:4000/api';
 const AV_RENKLER = ['#EA580C','#0284C7','#F59E0B','#7C3AED','#059669','#DC2626','#14B8A6'];
@@ -83,24 +84,6 @@ function EkipSecGroup({ label, secilenKey, selected, onChange, listeler }) {
   );
 }
 
-function dbToRow(s) {
-  const hastaAd = s.hasta ? `${s.hasta.name || ''} ${s.hasta.surname || ''}`.trim() : '—';
-  const dt = s.date ? new Date(s.date) : null;
-  const stMap = { 'Bekliyor':'dot-wait', 'Devam Ediyor':'dot-active', 'Tamamlandi':'dot-done', 'Hazırlanıyor':'dot-prep' };
-  return {
-    id:    s.id,
-    op:    s.type || '—',
-    hasta: hastaAd,
-    dr:    s.doctor?.name || '—',
-    salon: s.room?.name   || '—',
-    saat:  s.startTime    || '—',
-    bitis: s.endTime      || '—',
-    tarih: dt ? dt.toLocaleDateString('tr-TR') : '—',
-    st:    stMap[s.status] || 'dot-wait',
-    ekip:  s.ekip         || {},
-  };
-}
-
 export default function EkipPlani() {
   const { curRole } = useAuthStore();
   const { showToast } = useUIStore();
@@ -128,9 +111,8 @@ export default function EkipPlani() {
   useEffect(() => {
     const token = localStorage.getItem('operio_access');
     if (!token) { setYukleniyor(false); return; }
-    fetch(`${BASE}/ameliyatlar`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : [])
-      .then(list => setSurgeries((Array.isArray(list) ? list : (list.data || [])).map(dbToRow)))
+    listSurgeries()
+      .then(list => setSurgeries(list))
       .catch(() => {})
       .finally(() => setYukleniyor(false));
   }, []);

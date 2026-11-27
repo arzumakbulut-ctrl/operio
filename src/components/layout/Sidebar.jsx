@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuthStore, useThemeStore, useUIStore } from '../../store';
 import { ROLES } from '../../data/roles';
 import KatkiModal from '../ui/KatkiModal';
+import { listSurgeries } from '../../services/surgeriesAdapter.js';
 
 const ICONS = {
   dash:   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>,
@@ -42,12 +43,9 @@ export default function Sidebar({ onAIClick, mobileOpen, onMenuToggle }) {
   useEffect(() => {
     const token = localStorage.getItem('operio_access');
     if (!token) return;
-    fetch('http://localhost:4000/api/ameliyatlar', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.ok ? r.json() : [])
+    listSurgeries()
       .then(list => {
-        const n = (Array.isArray(list) ? list : (list.data || [])).filter(s => s.status === 'Bekliyor').length;
+        const n = list.filter(s => s.durum === 'Bekliyor').length;
         setBekleyenSayisi(n);
       })
       .catch(() => {});

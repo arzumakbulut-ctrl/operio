@@ -1,31 +1,42 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore, useUIStore } from '../store';
 import { ROLES } from '../data/roles';
+import { listSurgeries } from '../services/surgeriesAdapter.js';
 
 const BASE = 'http://localhost:4000/api';
 
+// NOT: s.hasta/s.dr/s.tarihRaw/s.saat/s.bitis/s.salon/s.op/s.durum/s.hastaDetay
+// surgeriesAdapter.listSurgeries()'in Türkçe-eşlenmiş alan adlarıdır (bkz. Task 2).
+// s.doctor/s.surgeon_name/s.date/s.startTime/s.endTime/s.room/s.type/s.title/s.status
+// eski/ham backend şekli — adapter bu alanları üretmiyor, geriye dönük uyumluluk
+// için fallback olarak bırakıldı.
 function dbToTalep(s) {
-  const hastaAd = s.hasta ? `${s.hasta.name || ''} ${s.hasta.surname || ''}`.trim() : '—';
-  const drAd    = s.doctor?.name || s.surgeon_name || '—';
+  const hastaAd = typeof s.hasta === 'string'
+    ? (s.hasta || '—')
+    : (s.hasta ? `${s.hasta.name || ''} ${s.hasta.surname || ''}`.trim() : '—');
+  const drAd    = s.dr || s.doctor?.name || s.surgeon_name || '—';
   const drAv    = drAd.replace(/Dr\.\s*/,'').split(' ').map(w => w[0]||'').join('').slice(0,2).toUpperCase();
-  const tarihDt = s.date ? new Date(s.date) : null;
+  const tarihDt = (s.tarihRaw || s.date) ? new Date(s.tarihRaw || s.date) : null;
   const tarihStr = tarihDt ? tarihDt.toLocaleDateString('tr-TR') : '—';
   const olusturanStr = s.createdAt ? new Date(s.createdAt).toLocaleString('tr-TR') : tarihStr;
-  const durum = s.status === 'Bekliyor'    ? 'beklemede'
-    : s.status === 'Onaylandi'             ? 'onaylandi'
-    : s.status === 'Devam Ediyor'          ? 'onaylandi'
-    : s.status === 'Tamamlandi'            ? 'onaylandi'
-    : s.status === 'Reddedildi'            ? 'reddedildi'
+  const statusVal = s.durum || s.status;
+  const durum = statusVal === 'Bekliyor'    ? 'beklemede'
+    : statusVal === 'Onaylandi'             ? 'onaylandi'
+    : statusVal === 'Devam Ediyor'          ? 'onaylandi'
+    : statusVal === 'Tamamlandi'            ? 'onaylandi'
+    : statusVal === 'Reddedildi'            ? 'reddedildi'
     : 'beklemede';
+  const saatVal  = s.saat || s.startTime || '—';
+  const bitisVal = s.bitis || s.endTime;
   return {
     id: s.id,
     doktor: drAd, doktorAv: drAv, doktorBg: '#DC2626',
-    op: s.type || s.title || '—',
-    hasta: { ad: hastaAd, yas: '—', tc: s.hasta?.tc || '—' },
+    op: s.op || s.type || s.title || '—',
+    hasta: { ad: hastaAd, yas: '—', tc: s.hastaDetay?.tc || s.hasta?.tc || '—' },
     tarih: tarihStr,
-    saat: s.startTime || '—',
-    sure: s.endTime ? `${s.startTime} – ${s.endTime}` : '—',
-    salon: s.room?.name || '—',
+    saat: saatVal,
+    sure: bitisVal ? `${saatVal} – ${bitisVal}` : '—',
+    salon: s.salon || s.room?.name || '—',
     anestezi: '—',
     kartAdi: '',
     malzeme: [], cihaz: [], ilac: [],
@@ -58,10 +69,8 @@ export default function OnayBekleyenler() {
   useEffect(() => {
     const token = localStorage.getItem('operio_access');
     if (!token) { setYukleniyor(false); return; }
-    fetch(`${BASE}/ameliyatlar`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : [])
-      .then(list => {
-        const data = Array.isArray(list) ? list : (list.data || []);
+    listSurgeries()
+      .then(data => {
         const mapped = data.map(dbToTalep);
         setTalepler(mapped);
         setBekleyenSayisi(mapped.filter(t => t.durum === 'beklemede').length);

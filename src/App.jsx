@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useSocket } from './hooks/useSocket';
 import { useAuthStore, useDataStore } from './store';
+import { listSurgeries } from './services/surgeriesAdapter.js';
 import AuthScreen from './components/auth/AuthScreen';
 import AppLayout from './components/layout/AppLayout';
 import Kiosk from './pages/Kiosk';
@@ -86,7 +87,6 @@ import AktiviteLoglari   from './pages/AktiviteLoglari';
 import SistemAyarlari    from './pages/SistemAyarlari';
 import WebsiteYonetimi   from './pages/WebsiteYonetimi';
 
-function mapSurgery(s){return{id:s.id,saat:s.startTime||"00:00",bitis:s.endTime||"",op:s.type||"",hasta:s.hasta?(s.hasta.name+" "+s.hasta.surname):"",dr:s.doctor?s.doctor.name:"",salon:s.room?s.room.name:"",tarih:s.date?new Date(s.date).toLocaleDateString("tr-TR"):"",tarihRaw:s.date||"",st:s.status==="Devam Ediyor"?"dot-active":s.status==="Tamamlandi"?"dot-done":"dot-wait",brans:"",sure:"",anestezi:"",durum:s.status||"Bekliyor",ekip:s.ekip||{},setler:[],malzeme:[],cihaz:[],ilac:[],tags:[],tlbl:[],hastaDetay:s.hasta||{}};}
 function mapHasta(h){return{id:h.id,ad:h.name||"",soyad:h.surname||"",yas:h.birthDate?new Date().getFullYear()-new Date(h.birthDate).getFullYear():"",cinsiyet:h.gender||"",tc:h.tc||"",tel:h.phone||"",kan:h.bloodType||"",alerjiler:h.allergies||"Yok",tani:"",asaSkor:"",agirlik:"",boy:"",son:"",op:"",notlar:h.notes||""};}
 function mapPersonel(p){return{id:p.id,ad:p.name||"",rol:p.specialty||"",specialty:p.specialty||"",r:p.specialty||"",av:(p.name||"").split(" ").map(function(w){return w[0]||"";}).join("").slice(0,2).toUpperCase(),bg:"#0284C7",durum:p.status||"Aktif",s:p.status||"Aktif",gun:0,tel:p.phone||"",email:p.email||"",sicil:"",uzmanlik:p.specialty||"",roleId:p.roleId||""};}
 function mapRoom(r){var m=r.name.match(/\d+/);return{id:r.id,ad:r.name,_sortNum:m?parseInt(m[0]):999,durum:r.status||"Bos",active:false,brans:"",op:"",ekip:[],time:"",kapasite:r.capacity||4,cihazlar:[]};}
@@ -100,9 +100,9 @@ function useApiLoader(){
     if(!token)return;
     var h={"Content-Type":"application/json","Authorization":"Bearer "+token};
     function get(path){return fetch("http://localhost:4000/api"+path,{headers:h}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});}
-    Promise.all([get("/ameliyatlar"),get("/hastalar"),get("/personel"),get("/rooms"),get("/steril"),get("/kurumlar"),get("/kurumlar/gruplar"),get("/cihazlar"),get("/cihazlar/bakim"),get("/cihazlar/ariza"),get("/finans/faturalar"),get("/finans/gelir-gider"),get("/notifications")]).then(function(results){
+    Promise.all([listSurgeries(),get("/hastalar"),get("/personel"),get("/rooms"),get("/steril"),get("/kurumlar"),get("/kurumlar/gruplar"),get("/cihazlar"),get("/cihazlar/bakim"),get("/cihazlar/ariza"),get("/finans/faturalar"),get("/finans/gelir-gider"),get("/notifications")]).then(function(results){
       var a=results[0],h2=results[1],p=results[2],r=results[3],s=results[4],k=results[5],g=results[6],cih=results[7],bak=results[8],arz=results[9],fat=results[10],gg=results[11],notifs=results[12];
-      if(a&&a.length)store.loadSurgeries(a.map(mapSurgery));
+      if(a&&a.length)store.loadSurgeries(a);
       if(h2&&h2.length)store.loadHastalar(h2.map(mapHasta));
       if(p&&p.length)store.loadPersonel(p.map(mapPersonel));
       if(r&&r.length)store.loadRooms(r.map(mapRoom).sort(function(a,b){return a._sortNum-b._sortNum;}));
