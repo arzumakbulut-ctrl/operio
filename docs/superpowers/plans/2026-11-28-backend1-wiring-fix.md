@@ -778,3 +778,62 @@ Expected: PASS
 git add src/pages/BildirimDuyuru.jsx src/pages/Kurum.jsx src/pages/AktiviteLoglari.jsx src/pages/Profil.jsx tests/components/MiscWiringFixes.test.jsx
 git commit -m "fix(misc): correct notification/audit/password-change endpoints"
 ```
+
+---
+
+### Task 10: OnayBekleyenler/EkipPlani Ameliyat Mutasyonlarını Taşı (Task 3 sırasında bulunan plan boşluğu)
+
+**Neden bu task var:** Task 3 sırasında keşfedildi — `OnayBekleyenler.jsx` ve `EkipPlani.jsx` Task 2'de SADECE `GET`/liste kısımları `listSurgeries()`'e taşındı (doğru); ama her iki dosyanın da KENDİ `PUT ${BASE}/ameliyatlar/:id` mutasyon çağrısı (onay/red, ekip güncelleme) hiçbir task'a atanmamıştı — orijinal plan bu iki dosyanın yazma tarafını gözden kaçırmıştı. Backend #1'de gerçek karşılığı (`PATCH /api/surgeries/:id`) zaten var (Task 1'de inşa edildi) — bu sadece eksik kablolama.
+
+**Files:**
+- Modify: `src/pages/OnayBekleyenler.jsx` (onay/red butonlarının mutasyon çağrısı)
+- Modify: `src/pages/EkipPlani.jsx` (ekip güncelleme mutasyon çağrısı)
+- Test: `tests/components/OnayBekleyenlerEkipPlaniMutations.test.jsx` (yeni)
+
+**Interfaces:**
+- Consumes: Task 1'in `updateSurgeryStatus(id, status)` ve/veya `assignTeamMember`/`removeTeamMember` (hangisinin gerçekte kullanıldığı, dosyanın mevcut mutasyonunun ne yaptığına bağlı — implementer dosyayı okuyup karar verir, Task 3'teki "brief'in varsayımı gerçek dosyadan farklıysa düzelt" dersi burada da geçerli).
+
+- [ ] **Step 1: Write the failing test**
+
+`tests/components/OnayBekleyenlerEkipPlaniMutations.test.jsx` — Task 3'teki `SurgeryMutationConsumers.test.jsx` ile AYNI dosya-içerik-kontrolü deseni:
+
+```jsx
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+
+describe('OnayBekleyenler/EkipPlani artık surgeriesAdapter kullanıyor (Task 3 plan boşluğu)', () => {
+  it.each([
+    ['src/pages/OnayBekleyenler.jsx'],
+    ['src/pages/EkipPlani.jsx'],
+  ])('%s artık eski PUT /ameliyatlar/:id yolunu kullanmıyor', (file) => {
+    const src = readFileSync(file, 'utf8');
+    expect(src).not.toMatch(/['"`]\/ameliyatlar\/\$?\{?/);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npm test -- tests/components/OnayBekleyenlerEkipPlaniMutations.test.jsx`
+Expected: FAIL
+
+- [ ] **Step 3: Her dosyayı güncelle**
+
+Task 3'teki AYNI desen: dosyanın gerçek mutasyon çağrısını oku, backend'in neyi karşıladığına göre (durum güncelleme mi, ekip ataması mı) doğru adapter fonksiyonunu çağır. Status Türkçe→İngilizce ters-çevirisi Task 3'te eklenen tabloyla TUTARLI olmalı (`'Iptal':'CANCELLED'` dahil).
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npm test -- tests/components/OnayBekleyenlerEkipPlaniMutations.test.jsx`
+Expected: PASS
+
+- [ ] **Step 5: Run full frontend test suite (regresyon)**
+
+Run: `npm test`
+Expected: PASS (bilinen 1-2 flaky test hariç — App.kioskRoute, SetTakip.visionCount)
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/pages/OnayBekleyenler.jsx src/pages/EkipPlani.jsx tests/components/OnayBekleyenlerEkipPlaniMutations.test.jsx
+git commit -m "fix(surgeries): migrate OnayBekleyenler/EkipPlani mutations (plan gap found during Task 3)"
+```
