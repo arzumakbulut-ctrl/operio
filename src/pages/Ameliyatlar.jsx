@@ -5,6 +5,7 @@ import AmeliyatDrawer from '../components/ui/AmeliyatDrawer';
 import HastaDrawer from '../components/ui/HastaDrawer';
 import { useNavigate } from 'react-router-dom';
 import { ROLES } from '../data/roles';
+import { createSurgery } from '../services/surgeriesAdapter';
 
 // Orijinal HTML'deki AVCOLORS ve sabitler
 const ST_RENK  = { 'dot-active':'#059669', 'dot-wait':'#D97706', 'dot-done':'#94A3B8', 'dot-prep':'#0284C7' };
@@ -265,29 +266,17 @@ export default function Ameliyatlar() {
       const personelData = await personelRes.json();
       const doktor = personelData[0];
 
-      const res = await fetch('http://localhost:4000/api/ameliyatlar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-        body: JSON.stringify({
-          type: ekleForm.tip,
-          hastaId: hasta.id,
-          roomId: ekleForm.salon,
-          doctorId: doktor?.id || null,
-          date: new Date(ekleForm.tarih + 'T00:00:00'),
-          startTime: ekleForm.saat,
-          endTime: ekleForm.bitis,
-          status: 'Bekliyor',
-          notes: ekleForm.notlar,
-        }),
+      const yeni = await createSurgery({
+        title: ekleForm.tip,
+        patientId: hasta.id,
+        roomId: ekleForm.salon,
+        surgeonName: doktor?.name || undefined,
+        scheduledStart: new Date(ekleForm.tarih + 'T' + ekleForm.saat).toISOString(),
+        scheduledEnd: new Date(ekleForm.tarih + 'T' + ekleForm.bitis).toISOString(),
+        notes: ekleForm.notlar,
       });
-      if (!res.ok) throw new Error('Kayit hatasi');
-      const yeni = await res.json();
-      addSurgery({
-        id: yeni.id, op: ekleForm.tip,
-        hasta: ekleForm.hastaAd, dr: doktor?.name || '',
-        salon: ekleForm.salon, saat: ekleForm.saat, bitis: ekleForm.bitis,
-        st: 'dot-wait', durum: 'Bekliyor', ekip: {}, setler: [], tags: [], tlbl: [],
-      });
+      if (!yeni) throw new Error('Kayit hatasi');
+      addSurgery(yeni);
       showToast('Ameliyat eklendi');
       setEkleModal(false);
       setEkleForm({tip:'',hastaAd:'',tarih:today,saat:'08:00',bitis:'10:00',salon:'salon_1',notlar:''});

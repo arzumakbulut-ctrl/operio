@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore, useUIStore } from '../store';
 import Modal from '../components/ui/Modal';
+import { listSurgeries } from '../services/surgeriesAdapter';
 
 const BASE = 'http://localhost:4000/api';
 
@@ -22,13 +23,19 @@ function roomNumSort(name) {
   return m ? parseInt(m[0]) : 999;
 }
 
+// NOT: Brief/plan bu okumanın "ham backend alanları" (room.name/status/type/startTime)
+// üzerinden yapıldığını varsaymıştı. Gerçek dosyada eski kod zaten (artık var
+// olmayan) `/ameliyatlar` ucundan ham veri bekliyordu; `listSurgeries()` ise
+// Task 1'in adapter'ından Türkçe anahtarlı (`salon`,`durum`,`op`,`saat`) şekilde
+// dönüyor — bu yüzden eşleşme alanları buna göre güncellendi (Task 2'nin
+// Sidebar.jsx/Istatistik.jsx'te yaptığı düzeltmeyle aynı tür ayarlama).
 function dbRoomToSalon(r, surgeries) {
   const uiStatus = DB_TO_UI[r.status] || 'idle';
-  const aktifAmeliyat = surgeries.find(s => s.room?.name === r.name && s.status === 'Devam Ediyor');
-  const bekleyenAmeliyat = surgeries.find(s => s.room?.name === r.name && (s.status === 'Bekliyor' || s.status === 'Onaylandi'));
+  const aktifAmeliyat = surgeries.find(s => s.salon === r.name && s.durum === 'Devam Ediyor');
+  const bekleyenAmeliyat = surgeries.find(s => s.salon === r.name && s.durum === 'Bekliyor');
   let op = '—';
-  if (aktifAmeliyat) op = aktifAmeliyat.type || 'Ameliyat devam ediyor';
-  else if (bekleyenAmeliyat) op = `Sıradaki: ${bekleyenAmeliyat.startTime || ''} ${bekleyenAmeliyat.type || ''}`.trim();
+  if (aktifAmeliyat) op = aktifAmeliyat.op || 'Ameliyat devam ediyor';
+  else if (bekleyenAmeliyat) op = `Sıradaki: ${bekleyenAmeliyat.saat || ''} ${bekleyenAmeliyat.op || ''}`.trim();
   return {
     id: r.id, num: r.name.replace('Salon ', ''), name: r.name,
     status: aktifAmeliyat ? 'active' : uiStatus,
@@ -56,9 +63,8 @@ export default function SalonYonetim() {
   useEffect(() => {
     Promise.all([
       fetch(`${BASE}/rooms`, { headers: h }).then(r => r.ok ? r.json() : []),
-      fetch(`${BASE}/ameliyatlar`, { headers: h }).then(r => r.ok ? r.json() : []),
-    ]).then(([rooms, amList]) => {
-      const ameliyatlar = Array.isArray(amList) ? amList : (amList.data || []);
+      listSurgeries(),
+    ]).then(([rooms, ameliyatlar]) => {
       const mapped = rooms
         .map(r => dbRoomToSalon(r, ameliyatlar))
         .sort((a, b) => roomNumSort(a.name) - roomNumSort(b.name));

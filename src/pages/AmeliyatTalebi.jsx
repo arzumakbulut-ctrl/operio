@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useDataStore, useUIStore } from '../store';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { createSurgery } from '../services/surgeriesAdapter';
 
 const BASE = 'http://localhost:4000/api';
 const tok = () => localStorage.getItem('operio_access');
@@ -53,25 +54,16 @@ export default function AmeliyatTalebi() {
 
   async function gonder() {
     try {
-      const token = localStorage.getItem('operio_access');
       const hasta = hastalar.find(h => `${h.ad} ${h.soyad||''}`.trim() === data.hasta.trim()) || hastalar[0];
       if (!hasta) { showToast('Hasta bulunamadı'); return; }
-      const res = await fetch('http://localhost:4000/api/ameliyatlar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({
-          hastaId: hasta.id,
-          roomId: 'salon_1',
-          doctorId: null,
-          date: new Date(data.tarih),
-          startTime: data.saat || '08:00',
-          endTime: '10:00',
-          status: 'Bekliyor',
-          type: data.kart?.name || 'Ameliyat Talebi',
-          notes: data.notlar,
-        }),
+      const yeni = await createSurgery({
+        title: data.kart?.name || 'Ameliyat Talebi',
+        patientId: hasta.id,
+        scheduledStart: new Date(data.tarih + 'T' + (data.saat || '08:00')).toISOString(),
+        scheduledEnd: new Date(data.tarih + 'T10:00').toISOString(),
+        notes: data.notlar,
       });
-      if (!res.ok) throw new Error('Sunucu hatasi');
+      if (!yeni) throw new Error('Sunucu hatasi');
       showToast('Ameliyat talebi gonderildi');
     } catch(e) { showToast('Hata: ' + e.message); return; }
     setStep(1);
