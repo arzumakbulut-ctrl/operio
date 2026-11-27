@@ -114,10 +114,23 @@ async function main() {
     ];
     const today = new Date().toISOString().slice(0,10);
     for (const s of SURGERIES) {
+      // `surgeries`'de (institution_id, room_id, title) için gerçek bir UNIQUE
+      // constraint yok (ve prod verisinde olmamalı — aynı salon+başlıkla
+      // tekrarlanan gerçek ameliyatlar meşrudur), bu yüzden eski
+      // "ON CONFLICT DO NOTHING" hiçbir şeye çarpmıyordu: her container
+      // restart'ında (docker-compose bunu HER başlangıçta çalıştırıyor) bu 3
+      // demo kaydı yeniden ekleniyordu. Demo seed'inin kendisi idempotent
+      // olmalı; bunu şema seviyesinde değil, burada (varlık kontrolüyle)
+      // sağlıyoruz.
+      const { rows: existing } = await pool.query(
+        'SELECT 1 FROM surgeries WHERE institution_id=$1 AND room_id=$2 AND title=$3 LIMIT 1',
+        [instId, s.room, s.title]
+      );
+      if (existing.length > 0) continue;
+
       await pool.query(
         `INSERT INTO surgeries (institution_id, room_id, title, branch, surgeon_name, scheduled_start, duration_min, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::surgery_status)
-         ON CONFLICT DO NOTHING`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8::surgery_status)`,
         [instId, s.room, s.title, s.branch, s.surgeon, `${today}T${s.start}:00+03:00`, s.dur, s.status]
       );
     }

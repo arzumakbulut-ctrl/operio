@@ -37,7 +37,15 @@ module.exports = {
     TOTP_WINDOW_MS:       5 * 60 * 1000,    // 5 dakika
     TOTP_MAX:             5,
     API_WINDOW_MS:        15 * 60 * 1000,
-    API_MAX:              100,
+    // 100'den 500'e çıkarıldı (2026-11-27): tek bir panel sayfası açılışında
+    // (dashboard + Topbar'ın paralel veri çekmeleri) ~15-20 istek gidiyor;
+    // ConnectionStatus.jsx'in 30sn'lik /health yoklaması da 15 dakikada +30
+    // istek ekliyor. 100, normal kullanımda (birkaç sayfa gezinme + arka plan
+    // yoklaması) bile kolayca doluyordu — gerçek bir kötüye kullanım sinyali
+    // değil, meşru kullanımın maliyetiydi. 500, aynı 15 dakikalık pencerede
+    // onlarca sayfa geçişini rahatça karşılar, yine de otomatik/brute-force
+    // bir tarama girişimini sınırlar.
+    API_MAX:              500,
     // Kiosk (/api/kiosk/*) — genel IP-bazlı limitten muaf; kiosk token'ının jti'sine
     // göre (cihaz başına) anahtarlanır. Boştaki bir kiosk /status yoklamasıyla 60
     // istek/15dk üretir; sesli komutlar (onaylı cihaz komutu = 2 çağrı) bunun üstüne
