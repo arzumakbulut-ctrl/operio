@@ -265,7 +265,7 @@ git commit -m "fix(surgeries): migrate list consumers to surgeriesAdapter"
 - Modify: `src/components/ui/AmeliyatDrawer.jsx` (durum güncelleme)
 - Modify: `src/pages/AmeliyatTalebi.jsx` (ameliyat oluşturma)
 - Modify: `src/pages/AmeliyatDetay.jsx` (durum güncelleme + ekip ataması)
-- Modify: `src/pages/SalonYonetim.jsx` (sadece ameliyat-referans kısmı — `/ameliyatlar` yolu varsa `listSurgeries()`'e çevrilir; salon-spesifik kısım Task 5'te)
+- Modify: `src/pages/SalonYonetim.jsx` (sadece ameliyat-referans kısmı — `/ameliyatlar` yolu varsa `listSurgeries()`'e çevrilir; salon-spesifik kısım Task 6'da)
 - Test: `tests/components/SurgeryMutationConsumers.test.jsx` (yeni)
 
 **Interfaces:**
@@ -306,7 +306,7 @@ Expected: FAIL
 - `AmeliyatDrawer.jsx`, `AmeliyatDetay.jsx`: mevcut `PUT /ameliyatlar/:id {status:...}` çağrısı → `updateSurgeryStatus(id, backendStatus)`. Arayüzün kendi durum string'i Türkçe ise (`'Devam Ediyor'` vb.) önce backend enum'una çevrilir (Task 1'deki `STATUS_TO_TR`'nin TERSİ — implementer bunu `AmeliyatDrawer.jsx`/`AmeliyatDetay.jsx` içinde küçük bir ters-eşleme sabitiyle yapar: `{'Bekliyor':'WAITING','Devam Ediyor':'IN_PROGRESS','Tamamlandi':'COMPLETED'}`).
 - `AmeliyatDetay.jsx`'teki ekip ataması: mevcut `{ekip:[...]}` PUT body'si KALDIRILIR; ekip listesindeki her üye için ayrı ayrı `assignTeamMember(surgeryId, userId, teamRole)` çağrılır (çıkarılan üyeler için `removeTeamMember`).
 - `AmeliyatTalebi.jsx`: aynı `createSurgery` deseni, formun kendi alan isimleri Ameliyatlar.jsx'teki gibi eşlenir.
-- `SalonYonetim.jsx`: eğer dosyada `/ameliyatlar` referansı varsa (denetim raporunda "referans" olarak not edildi) `listSurgeries()`'e çevrilir — Task 5'teki salon-spesifik değişikliklerle KARIŞTIRILMAZ, bu adım sadece ameliyat-okuma kısmını kapsar.
+- `SalonYonetim.jsx`: eğer dosyada `/ameliyatlar` referansı varsa (denetim raporunda "referans" olarak not edildi) `listSurgeries()`'e çevrilir — Task 6'daki salon-spesifik değişikliklerle KARIŞTIRILMAZ, bu adım sadece ameliyat-okuma kısmını kapsar.
 
 - [ ] **Step 4: Run test to verify it passes**
 
