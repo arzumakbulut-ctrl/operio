@@ -203,7 +203,7 @@ export default function Ameliyatlar() {
   const [dashTab, setDashTab] = useState('tumAmeliyatlar');
   const [ekleModal, setEkleModal] = useState(false);
   const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
-  const [ekleForm, setEkleForm] = useState({tip:'',hastaAd:'',tarih:today,saat:'08:00',bitis:'10:00',salon:'salon_1',notlar:''});
+  const [ekleForm, setEkleForm] = useState({tip:'',hastaAd:'',tarih:today,saat:'08:00',bitis:'10:00',salon:'',notlar:''});
   const [ekleLoading, setEkleLoading] = useState(false);
   const [aramaMetni, setAramaMetni] = useState('');
   const [durumFiltre, setDurumFiltre] = useState('Tumu');
@@ -269,7 +269,7 @@ export default function Ameliyatlar() {
       const yeni = await createSurgery({
         title: ekleForm.tip,
         patientId: hasta.id,
-        roomId: ekleForm.salon,
+        roomId: ekleForm.salon || null,
         surgeonName: doktor?.name || undefined,
         scheduledStart: new Date(ekleForm.tarih + 'T' + ekleForm.saat).toISOString(),
         scheduledEnd: new Date(ekleForm.tarih + 'T' + ekleForm.bitis).toISOString(),
@@ -279,7 +279,7 @@ export default function Ameliyatlar() {
       addSurgery(yeni);
       showToast('Ameliyat eklendi');
       setEkleModal(false);
-      setEkleForm({tip:'',hastaAd:'',tarih:today,saat:'08:00',bitis:'10:00',salon:'salon_1',notlar:''});
+      setEkleForm({tip:'',hastaAd:'',tarih:today,saat:'08:00',bitis:'10:00',salon:'',notlar:''});
     } catch(e) { showToast('Hata: ' + e.message); }
     setEkleLoading(false);
   }
@@ -575,6 +575,7 @@ export default function Ameliyatlar() {
               <div className="fg" style={{marginBottom:12}}>
                 <label className="fl">SALON</label>
                 <select className="fi" value={ekleForm.salon} onChange={e=>setEkleForm(p=>({...p,salon:e.target.value}))}>
+                  <option value="">Salon seçin (opsiyonel)</option>
                   {rooms.map(r => <option key={r.id} value={r.id}>{r.ad||r.name}</option>)}
                 </select>
               </div>

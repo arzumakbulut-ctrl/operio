@@ -20,4 +20,16 @@ describe('Ameliyat yazma işlemleri artık surgeriesAdapter kullanıyor', () => 
     expect(src).not.toMatch(/['"`]\/ameliyatlar/);
     expect(src).toContain(fn);
   });
+
+  // Review bulgusu: ekleForm.salon'un varsayılanı sahte 'salon_1' string'iydi
+  // (gerçek oda UUID'leriyle eşleşmiyor) ve roomId olarak backend'e doğrudan
+  // gönderiliyordu — backend şeması roomId için UUID/null bekliyor, kullanıcı
+  // salonu değiştirmeden gönderirse 400 ile başarısız olurdu (AmeliyatTalebi.jsx
+  // için zaten düzeltilen aynı hata sınıfı). Artık geçersiz placeholder
+  // bulunmuyor ve roomId boşken null olarak gönderiliyor.
+  it('Ameliyatlar.jsx artık geçersiz salon_1 placeholder\'ını roomId olarak göndermiyor', () => {
+    const src = readFileSync('src/pages/Ameliyatlar.jsx', 'utf8');
+    expect(src).not.toMatch(/salon_1/);
+    expect(src).toMatch(/roomId:\s*ekleForm\.salon\s*\|\|\s*null/);
+  });
 });
