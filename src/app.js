@@ -9,6 +9,7 @@ const { sanitizeMiddleware }        = require('./utils/sanitize');
 const authRoutes     = require('./routes/auth.routes');
 const platformAdminAuthRoutes = require('./routes/platformAdminAuth.routes');
 const institutionsRoutes = require('./routes/institutions.routes');
+const institutionGroupsRoutes = require('./routes/institutionGroups.routes');
 const surgeryRoutes  = require('./routes/surgery.routes');
 const securityRoutes = require('./routes/security.routes');
 const aiRoutes       = require('./routes/ai.routes');
@@ -139,6 +140,7 @@ app.get('/health', (req, res) => {
 app.use('/api/auth',         authRoutes);
 app.use('/api/platform-admin/auth', platformAdminAuthRoutes);
 app.use('/api/platform-admin/institutions', institutionsRoutes);
+app.use('/api/platform-admin/institution-groups', institutionGroupsRoutes);
 app.use('/api/surgeries',    surgeryRoutes);
 app.use('/api/patients',     patientRouter);
 app.use('/api/rooms',        roomRouter);

@@ -130,6 +130,13 @@ const institutionStatusSchema = z.object({
   isActive: z.boolean(),
 });
 
+// ── KURUM GRUBU (Hastane Zinciri) ───────────────────────────
+// POST (createGroup) ve PATCH (updateGroup) için AYNI şema — ikisi de service
+// katmanında `name`'i doğrudan ve zorunlu alır (bkz. institutionGroup.service.js).
+const institutionGroupCreateSchema = z.object({
+  name: z.string().min(2, 'Grup adı en az 2 karakter olmalı').max(200),
+});
+
 // ── BİLDİRİM ────────────────────────────────────────────────
 const notificationCreateSchema = z.object({
   targetRole:   z.number().int().min(0).max(10).optional().nullable(),
@@ -251,6 +258,7 @@ module.exports = {
   institutionCreateSchema,
   institutionUpdateSchema,
   institutionStatusSchema,
+  institutionGroupCreateSchema,
   notificationCreateSchema,
   paginationSchema,
   deviceCreateSchema,
