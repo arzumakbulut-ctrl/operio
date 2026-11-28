@@ -137,6 +137,24 @@ const institutionGroupCreateSchema = z.object({
   name: z.string().min(2, 'Grup adı en az 2 karakter olmalı').max(200),
 });
 
+// ── PLATFORM-ADMIN HESABI ────────────────────────────────────
+// groupSlug sabit 4 değerle sınırlı — migrations/002_platform_admin.sql'in seed'i
+// (super/destek/finans/icerik) ile AYNI 4 slug; platformAdminAccount.service.js'in
+// listGroups'u da sabit bu 4 satırı bekler, burada yeni bir slug kabul etmek
+// servis tarafında karşılığı olmayan bir grup_slug'ın DB'ye FK ihlaliyle (ya da
+// sessizce) girmesine yol açardı — bu yüzden enum burada, create ZORUNLU alır.
+const platformAdminAccountCreateSchema = z.object({
+  email:     z.string().email('Geçerli bir e-posta girin').max(200, 'E-posta 200 karakterden uzun olamaz'),
+  fullName:  z.string().min(2, 'Ad soyad en az 2 karakter olmalı').max(200),
+  groupSlug: z.enum(['super', 'destek', 'finans', 'icerik']),
+});
+
+// PATCH — tüm alanlar opsiyonel (kısmi güncelleme, platformSettingsUpdateSchema'nın
+// AYNI deseni); isActive create şemasında YOK (yeni hesap her zaman aktif oluşturulur).
+const platformAdminAccountUpdateSchema = platformAdminAccountCreateSchema.partial().extend({
+  isActive: z.boolean().optional(),
+});
+
 // ── KURUM TALEBİ (Destek/Faturalama/Satış Biletleri) ─────────
 // createSchema bu task'ın router'ında KULLANILMAZ — tasarım dokümanının kendi
 // kararı (hastane tarafının "destek talebi aç" akışı bu konsolun kapsamı
@@ -296,6 +314,8 @@ module.exports = {
   institutionUpdateSchema,
   institutionStatusSchema,
   institutionGroupCreateSchema,
+  platformAdminAccountCreateSchema,
+  platformAdminAccountUpdateSchema,
   supportTicketCreateSchema,
   supportTicketUpdateSchema,
   supportTicketCommentSchema,
