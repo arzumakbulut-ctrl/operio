@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useDataStore, useUIStore, useAuthStore } from '../store';
 import Modal from '../components/ui/Modal';
-import { listSterileSets, createSterileSet, updateSterileSet } from '../services/sterileSetsAdapter.js';
+import { listSterileSets, createSterileSet, updateSterileSet, TR_TO_STATUS } from '../services/sterileSetsAdapter.js';
 
 // ── İKONLAR (HTML ICONS'tan) ─────────────────────────────────
 const IC_SET   = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:12,height:12}}><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>;
@@ -114,9 +114,9 @@ export default function SterilSetler() {
     const payload = {
       name,
       code: doktor,
-      shelf_location: raf,
-      status: form.durum,
-      instruments: aletler.map(a => ({ name:a.ad, expected_count:a.adet })),
+      shelfLocation: raf,
+      status: TR_TO_STATUS[form.durum] || 'STERILE',
+      instruments: aletler.map(a => ({ name:a.ad, expectedCount:a.adet })),
     };
 
     try {
@@ -141,11 +141,18 @@ export default function SterilSetler() {
   }
 
   async function updateDurum(id, durum) {
-    setSetler(prev => prev.map(x => x.id===id ? {...x, durum} : x));
+    const prev = setler.find(x => x.id === id);
+    setSetler(p => p.map(x => x.id===id ? {...x, durum} : x));
     try {
-      await updateSterileSet(id, { status: durum });
+      const result = await updateSterileSet(id, { status: TR_TO_STATUS[durum] || 'STERILE' });
+      if (!result) {
+        if (prev) setSetler(p => p.map(x => x.id===id ? {...x, durum: prev.durum} : x));
+        showToast('Durum güncellenemedi');
+        return;
+      }
       showToast('Set durumu güncellendi: ' + durum);
     } catch(e) {
+      if (prev) setSetler(p => p.map(x => x.id===id ? {...x, durum: prev.durum} : x));
       showToast('Güncelleme hatası: ' + e.message);
     }
   }

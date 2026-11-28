@@ -16,6 +16,20 @@ const STATUS_TO_TR = {
   RETIRED:      'Arızalı',
 };
 
+// Yazma (create/update) yönünde kullanılan ters harita: UI etiketi → backend enum.
+// STATUS_TO_TR tam tersine çevrilemez çünkü FAULTY ve RETIRED aynı TR etikete
+// ('Arızalı') eşleniyor — geri dönüşte FAULTY varsayılan olarak seçildi (daha
+// yaygın/tahmin edilebilir durum). 'Eksik Parça' backend'de hiç karşılığı
+// olmayan bir UI-only etiket; eksik parça da pratikte "arızalı set" sayıldığı
+// için FAULTY'e eşlendi.
+export const TR_TO_STATUS = {
+  'Steril — Hazır':  'STERILE',
+  'Kullanımda':      'IN_USE',
+  'Sterilizasyonda': 'STERILIZING',
+  'Eksik Parça':     'FAULTY',
+  'Arızalı':         'FAULTY',
+};
+
 function authHeaders() {
   return {
     'Content-Type': 'application/json',
