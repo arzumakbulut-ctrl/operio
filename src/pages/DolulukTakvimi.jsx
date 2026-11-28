@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useUIStore, useDataStore } from '../store';
-
-const BASE = 'http://localhost:4000/api';
+import { listSurgeries } from '../services/surgeriesAdapter.js';
 
 const SALON_RENKLER = ['#14B8A6','#DC2626','#F59E0B','#6366F1'];
 const GUN_ADLARI   = ['Pzt','Sal','Çar','Per','Cum','Cts','Paz'];
@@ -57,30 +56,25 @@ export default function DolulukTakvimi() {
   useEffect(() => {
     const token = localStorage.getItem('operio_access');
     if (!token) return;
-    fetch(`${BASE}/ameliyatlar`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.ok ? r.json() : null)
-      .then(json => {
-        if (!json) return;
-        const list = Array.isArray(json) ? json : (json.data || json.surgeries || []);
+    listSurgeries()
+      .then(list => {
         const built = {};
         list.forEach(s => {
-          const salon = s.room?.name || s.roomId || 'Salon 1';
-          const dt = new Date(s.date || s.scheduledStart || '');
+          const salon = s.salon || s.room?.name || s.roomId || 'Salon 1';
+          const dt = new Date(s.tarihRaw || s.date || s.scheduledStart || '');
           if (isNaN(dt.getTime())) return;
           const tarih = tarihKey(dt);
-          const saat  = s.startTime || `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
+          const saat  = s.saat || s.startTime || `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`;
           const salonIdx = Object.keys(built).indexOf(salon);
           const renk = SALON_RENKLER[(salonIdx === -1 ? Object.keys(built).length : salonIdx) % SALON_RENKLER.length];
           if (!built[salon]) built[salon] = {};
           if (!built[salon][tarih]) built[salon][tarih] = [];
           built[salon][tarih].push({
             saat,
-            op:    s.type || s.title || s.op || '',
-            dr:    s.doctor?.name || s.surgeon_name || s.dr || '',
+            op:    s.op || s.type || s.title || '',
+            dr:    s.dr || s.doctor?.name || s.surgeon_name || '',
             sure:  '',
-            hasta: s.hasta ? `${s.hasta.name || ''} ${s.hasta.surname || ''}`.trim() : '',
+            hasta: typeof s.hasta === 'string' ? s.hasta : (s.hasta ? `${s.hasta.name || ''} ${s.hasta.surname || ''}`.trim() : ''),
             renk,
           });
         });

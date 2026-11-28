@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
+import { useUIStore } from '../store';
 
 
 const TIP_CFG = {
@@ -12,13 +13,30 @@ const TIP_CFG = {
 
 export default function AktiviteLoglari() {
   const token = localStorage.getItem('operio_access');
+  const { showToast } = useUIStore();
   const [AKTIVITE_LOGLARI, setAKTIVITE_LOGLARI] = useState([]);
   useEffect(() => {
-    fetch('http://localhost:4000/api/logs', {
+    // Gerçek backend #1 uç noktası: GET /api/audit — {success,data:[],meta} zarfı.
+    // Satırlar düz (nested .user yok) snake_case DB kolonları: action, resource,
+    // resource_id, created_at, full_name (LEFT JOIN users) — bkz. migrations/001_init.sql.
+    fetch('http://localhost:4000/api/audit', {
       headers: { 'Authorization': 'Bearer ' + token }
-    }).then(r => r.ok ? r.json() : { items: [] })
-      .then(data => setAKTIVITE_LOGLARI((data.items||[]).map(function(l){return{id:l.id,tarih:l.createdAt?new Date(l.createdAt).toLocaleString("tr-TR"):"",kullanici:l.user?l.user.name:"Sistem",islem:l.action||"",detay:l.entity?l.entity+(l.entityId?" #"+l.entityId:""):"",tip:l.entity?l.entity.toLowerCase():"sistem"};})))
-      .catch(() => {});
+    }).then(r => r.json().catch(() => null).then(json => ({ status: r.status, json })))
+      .then(({ status, json }) => {
+        if (!json?.success) {
+          // Final review Finding 5: GET /api/audit sadece Üst Yönetici'ye
+          // açık — diğer roller için backend 403/FORBIDDEN döner. Bu gerçek
+          // bir hata değil, rol bazlı görünürlük kısıtı; sessizce boş liste
+          // göster, toast GÖSTERME (diğer tüm hata türlerinde toast
+          // göstermeye devam et).
+          if (status === 403 || json?.error?.code === 'FORBIDDEN') { setAKTIVITE_LOGLARI([]); return; }
+          showToast(json?.error?.message || 'Aktivite logları yüklenemedi');
+          return;
+        }
+        const rows = Array.isArray(json.data) ? json.data : [];
+        setAKTIVITE_LOGLARI(rows.map(function(l){return{id:l.id,tarih:l.created_at?new Date(l.created_at).toLocaleString("tr-TR"):"",kullanici:l.full_name||"Sistem",islem:l.action||"",detay:l.resource?l.resource+(l.resource_id?" #"+l.resource_id:""):"",tip:l.resource?l.resource.toLowerCase():"sistem"};}));
+      })
+      .catch(() => showToast('Aktivite logları yüklenemedi'));
   }, []);
   const [filtre, setFiltre] = useState('tumu');
   const [arama, setArama] = useState('');

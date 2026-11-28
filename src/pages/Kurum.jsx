@@ -24,10 +24,25 @@ export default function Kurum() {
 
   useEffect(() => {
     const token = localStorage.getItem('operio_access');
-    fetch('http://localhost:4000/api/logs', { headers: { Authorization: 'Bearer ' + token } })
-      .then(r => r.ok ? r.json() : { items: [] })
-      .then(data => setLogs(data.items || []))
-      .catch(() => {});
+    // Gerçek backend #1 uç noktası: GET /api/audit — {success,data:[],meta} zarfı,
+    // satırlar düz (nested .user yok) snake_case DB kolonları: action, resource,
+    // resource_id, created_at, full_name (LEFT JOIN users).
+    fetch('http://localhost:4000/api/audit', { headers: { Authorization: 'Bearer ' + token } })
+      .then(r => r.json().catch(() => null).then(json => ({ status: r.status, json })))
+      .then(({ status, json }) => {
+        if (!json?.success) {
+          // Final review Finding 5: GET /api/audit sadece Üst Yönetici'ye
+          // (authorize(0)) açık — diğer roller için backend 403/FORBIDDEN
+          // döner. Bu gerçek bir hata değil, rol bazlı bir görünürlük kısıtı;
+          // bu durumda sessizce boş liste göster, toast GÖSTERME (diğer tüm
+          // hata türlerinde toast göstermeye devam et).
+          if (status === 403 || json?.error?.code === 'FORBIDDEN') { setLogs([]); return; }
+          showToast(json?.error?.message || 'Aktivite günlüğü yüklenemedi');
+          return;
+        }
+        setLogs(Array.isArray(json.data) ? json.data : []);
+      })
+      .catch(() => showToast('Aktivite günlüğü yüklenemedi'));
   }, []);
 
   const enrichedRooms = (rooms || []).map(r => {
@@ -373,11 +388,11 @@ export default function Kurum() {
                   <div style={{ flex:1 }}>
                     <div style={{ fontSize:13, fontWeight:600, color:'var(--slate)' }}>{a.action}</div>
                     <div style={{ fontSize:11.5, color:'var(--slate-light)', marginTop:2 }}>
-                      {a.user ? a.user.name : 'Sistem'}{a.entity ? ` · ${a.entity}${a.entityId ? ' #' + a.entityId : ''}` : ''}
+                      {a.full_name || 'Sistem'}{a.resource ? ` · ${a.resource}${a.resource_id ? ' #' + a.resource_id : ''}` : ''}
                     </div>
                   </div>
                   <div style={{ fontSize:11, color:'var(--slate-light)', flexShrink:0 }}>
-                    {a.createdAt ? new Date(a.createdAt).toLocaleString('tr-TR') : ''}
+                    {a.created_at ? new Date(a.created_at).toLocaleString('tr-TR') : ''}
                   </div>
                 </div>
               ))}

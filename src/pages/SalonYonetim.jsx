@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore, useUIStore } from '../store';
 import Modal from '../components/ui/Modal';
+import { listSurgeries } from '../services/surgeriesAdapter';
+import { DB_TO_UI, UI_TO_DB } from '../services/roomStatusMap.js';
 
 const BASE = 'http://localhost:4000/api';
 
@@ -12,23 +14,28 @@ const SALON_CFG = {
   closed:      { cls:'st-closed',      dot:'#DC2626', txt:'Kapalı',      shadow:''                                  },
 };
 
-// DB Turkish status → UI key
-const DB_TO_UI = { 'Bos':'idle', 'Aktif':'active', 'Rezerve':'reserved', 'Bakimda':'maintenance', 'Kapali':'closed' };
-// UI key → DB Turkish status
-const UI_TO_DB = { idle:'Bos', active:'Aktif', reserved:'Rezerve', maintenance:'Bakimda', closed:'Kapali' };
+// DB status (backend #1 roomStatusSchema enum) → UI key / UI key → DB status
+// enum: final review Finding 2 ile src/services/roomStatusMap.js'e taşındı
+// (App.jsx'in global useApiLoader'ı da AYNI tabloyu kullanıyor).
 
 function roomNumSort(name) {
   const m = name.match(/\d+/);
   return m ? parseInt(m[0]) : 999;
 }
 
+// NOT: Brief/plan bu okumanın "ham backend alanları" (room.name/status/type/startTime)
+// üzerinden yapıldığını varsaymıştı. Gerçek dosyada eski kod zaten (artık var
+// olmayan) `/ameliyatlar` ucundan ham veri bekliyordu; `listSurgeries()` ise
+// Task 1'in adapter'ından Türkçe anahtarlı (`salon`,`durum`,`op`,`saat`) şekilde
+// dönüyor — bu yüzden eşleşme alanları buna göre güncellendi (Task 2'nin
+// Sidebar.jsx/Istatistik.jsx'te yaptığı düzeltmeyle aynı tür ayarlama).
 function dbRoomToSalon(r, surgeries) {
   const uiStatus = DB_TO_UI[r.status] || 'idle';
-  const aktifAmeliyat = surgeries.find(s => s.room?.name === r.name && s.status === 'Devam Ediyor');
-  const bekleyenAmeliyat = surgeries.find(s => s.room?.name === r.name && (s.status === 'Bekliyor' || s.status === 'Onaylandi'));
+  const aktifAmeliyat = surgeries.find(s => s.salon === r.name && s.durum === 'Devam Ediyor');
+  const bekleyenAmeliyat = surgeries.find(s => s.salon === r.name && s.durum === 'Bekliyor');
   let op = '—';
-  if (aktifAmeliyat) op = aktifAmeliyat.type || 'Ameliyat devam ediyor';
-  else if (bekleyenAmeliyat) op = `Sıradaki: ${bekleyenAmeliyat.startTime || ''} ${bekleyenAmeliyat.type || ''}`.trim();
+  if (aktifAmeliyat) op = aktifAmeliyat.op || 'Ameliyat devam ediyor';
+  else if (bekleyenAmeliyat) op = `Sıradaki: ${bekleyenAmeliyat.saat || ''} ${bekleyenAmeliyat.op || ''}`.trim();
   return {
     id: r.id, num: r.name.replace('Salon ', ''), name: r.name,
     status: aktifAmeliyat ? 'active' : uiStatus,
@@ -53,12 +60,26 @@ export default function SalonYonetim() {
   const canManage = curRole === 0 || curRole === 1;
 
   // DB'den yükle
+  // NOT (Task 6 — sonradan eklenen düzeltme): Bu satır gerçek backend #1'in
+  // {success,data} zarfını hiç soymuyordu — r.json() çıplak bir dizi değil
+  // {success,data:[...]} objesi döndürüyor, bu yüzden rooms.map(...) aşağıda
+  // çöküyordu (yalnızca mevcut .catch(()=>{}) sayesinde sayfa çökmüyor, salon
+  // listesi sessizce boş kalıyordu — kullanıcının "salonlarım görünmüyor"
+  // şikayetinin kök nedeni buydu). Create/status-update için zaten kurulan
+  // aynı {success,data}/{success,error} ayrıştırma + hata-toast deseni
+  // burada da uygulandı.
   useEffect(() => {
     Promise.all([
-      fetch(`${BASE}/rooms`, { headers: h }).then(r => r.ok ? r.json() : []),
-      fetch(`${BASE}/ameliyatlar`, { headers: h }).then(r => r.ok ? r.json() : []),
-    ]).then(([rooms, amList]) => {
-      const ameliyatlar = Array.isArray(amList) ? amList : (amList.data || []);
+      fetch(`${BASE}/rooms`, { headers: h }).then(async (r) => {
+        const json = await r.json().catch(() => null);
+        if (!r.ok || !json?.success) {
+          showToast(json?.error?.message || 'Salonlar yüklenemedi');
+          return [];
+        }
+        return Array.isArray(json.data) ? json.data : [];
+      }).catch(() => { showToast('Salonlar yüklenemedi'); return []; }),
+      listSurgeries(),
+    ]).then(([rooms, ameliyatlar]) => {
       const mapped = rooms
         .map(r => dbRoomToSalon(r, ameliyatlar))
         .sort((a, b) => roomNumSort(a.name) - roomNumSort(b.name));
@@ -85,36 +106,85 @@ export default function SalonYonetim() {
     setOpenDrop(null);
   }
 
-  function saveSalon() {
+  async function saveSalon() {
     if (modal === 'yeni') {
-      showToast('Yeni salon eklemek için backend desteği gerekiyor');
+      // Gerçek backend #1 uç noktası: POST /api/rooms (roomCreateSchema).
+      // roomNumber/capacity backend'de z.number() — form alanları string
+      // geldiği için Number(...) dönüşümü şart, aksi halde 400 döner.
+      try {
+        const res = await fetch(`${BASE}/rooms`, {
+          method: 'POST', headers: h,
+          body: JSON.stringify({
+            name:       form.name,
+            roomNumber: Number(form.num),
+            capacity:   Number(form.cap) || 6,
+          }),
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok || !json?.success) {
+          showToast(json?.error?.message || 'Salon eklenemedi');
+          return;
+        }
+        // Savunmacı kontrol: beklenmeyen/şekli bozuk bir "success" yanıtı
+        // (örn. salon nesnesi yerine başka bir şey) sayfayı çökertmesin.
+        const created = json.data;
+        if (created && typeof created === 'object' && !Array.isArray(created) && created.name) {
+          setSalons(p => [...p, dbRoomToSalon(created, [])]
+            .sort((a, b) => roomNumSort(a.name) - roomNumSort(b.name)));
+        }
+        showToast('Salon eklendi ✓');
+      } catch (_) {
+        showToast('Salon eklenemedi');
+        return;
+      }
     } else {
-      // Durum değişikliği — DB'ye yaz
-      const dbStatus = UI_TO_DB[form.status] || 'Bos';
-      fetch(`${BASE}/rooms/${modal.id}`, {
-        method: 'PUT', headers: h,
-        body: JSON.stringify({ status: dbStatus }),
-      }).catch(() => {});
-      setSalons(p => p.map(s => s.id === modal.id
-        ? { ...s, status: form.status, cap: Number(form.cap) }
-        : s
-      ));
-      showToast('Salon güncellendi ✓');
+      // Durum değişikliği — gerçek backend #1 uç noktası:
+      // PATCH /api/rooms/:id/status (roomStatusSchema), body sadece {status}.
+      const dbStatus = UI_TO_DB[form.status] || 'IDLE';
+      try {
+        const res = await fetch(`${BASE}/rooms/${modal.id}/status`, {
+          method: 'PATCH', headers: h,
+          body: JSON.stringify({ status: dbStatus }),
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok || !json?.success) {
+          showToast(json?.error?.message || 'Salon güncellenemedi');
+          return;
+        }
+        setSalons(p => p.map(s => s.id === modal.id
+          ? { ...s, status: form.status, cap: Number(form.cap) }
+          : s
+        ));
+        showToast('Salon güncellendi ✓');
+      } catch (_) {
+        showToast('Salon güncellenemedi');
+        return;
+      }
     }
     setModal(null);
   }
 
   async function changeStatus(id, newStatus) {
-    const dbStatus = UI_TO_DB[newStatus] || 'Bos';
+    const prev = aktivSalonlar.find(s => s.id === id);
+    const dbStatus = UI_TO_DB[newStatus] || 'IDLE';
     setSalons(p => p.map(s => s.id === id ? { ...s, status: newStatus } : s));
     setOpenDrop(null);
-    showToast('Salon durumu güncellendi');
     try {
-      await fetch(`${BASE}/rooms/${id}`, {
-        method: 'PUT', headers: h,
+      const res = await fetch(`${BASE}/rooms/${id}/status`, {
+        method: 'PATCH', headers: h,
         body: JSON.stringify({ status: dbStatus }),
       });
-    } catch (_) {}
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        if (prev) setSalons(p => p.map(s => s.id === id ? { ...s, status: prev.status } : s));
+        showToast(json?.error?.message || 'Salon durumu güncellenemedi');
+        return;
+      }
+      showToast('Salon durumu güncellendi');
+    } catch (_) {
+      if (prev) setSalons(p => p.map(s => s.id === id ? { ...s, status: prev.status } : s));
+      showToast('Salon durumu güncellenemedi');
+    }
   }
 
   function deleteSalon(id) {

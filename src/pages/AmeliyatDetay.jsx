@@ -2,7 +2,11 @@ import { useState, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useDataStore, useUIStore, useAuthStore } from '../store';
 import { ROLES } from '../data/roles';
+import { updateSurgeryStatus, assignTeamMember, removeTeamMember, STATUS_TO_BACKEND } from '../services/surgeriesAdapter';
 
+// Final review Finding 1: STATUS_TO_BACKEND artık surgeriesAdapter.js'den
+// import ediliyor (önceden burada ayrı bir yerel kopyası vardı —
+// OnayBekleyenler.jsx'in kendi kopyasıyla tutarsız kalma riski taşıyordu).
 
 const ATANABILIR_HEMSIRE  = ['scrub','sirkule','yardimci'];
 const EKIP_COLORS_AD = { cerrah:'#DC2626', asistan:'#EA580C', scrub:'#0284C7', scrub2:'#0284C7', sirkule:'#7C3AED', anestezi:'#14B8A6', anesteknik:'#059669', yardimci:'#D97706' };
@@ -133,18 +137,26 @@ export default function AmeliyatDetay() {
   const [medya, setMedya]             = useState(s?.medya || []);
   const [ekipState, setEkipState]     = useState(() => ({...(s?.ekip||{})}));
   const [atamaModal, setAtamaModal]   = useState(null); // aktif roleKey
-  async function ekipKaydet(yeniEkip) {
-    const token = localStorage.getItem('operio_access');
-    try {
-      await fetch('http://localhost:4000/api/ameliyatlar/' + s.id, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-        body: JSON.stringify({ ekip: yeniEkip }),
-      });
-      updateSurgery(s.id, { ekip: yeniEkip });
-    } catch(e) { console.error(e); }
+  // Eski kod `{ekip: yeniEkip}` ile PUT /ameliyatlar/:id çağırıyordu (nonexistent
+  // route). Backend ekip ataması/çıkarmayı kişi bazlı ayrı uçlardan yapıyor, o
+  // yüzden yeni/eski ekip haritası karşılaştırılıp değişen her rol için ayrı
+  // assignTeamMember/removeTeamMember çağrılır. PERSONEL şu an backend'de
+  // /personel ucu bulunmadığı için genelde App.jsx'in seed/mock verisinde kalıyor
+  // — bu durumda eşleşme bulunamayan roller sessizce atlanır (ayrı, bu planın
+  // kapsamı dışında bir personel-kablolama sorunu).
+  async function ekipKaydet(yeniEkip, eskiEkip) {
+    for (const [roleKey, ad] of Object.entries(yeniEkip)) {
+      if (!ad || ad === '—') continue;
+      const eskiAd = eskiEkip?.[roleKey];
+      if (eskiAd === ad) continue;
+      const eskiPersonel = eskiAd ? PERSONEL.find(p => p.ad === eskiAd) : null;
+      if (eskiPersonel) await removeTeamMember(s.id, eskiPersonel.id);
+      const yeniPersonel = PERSONEL.find(p => p.ad === ad);
+      if (yeniPersonel) await assignTeamMember(s.id, yeniPersonel.id, roleKey);
+    }
+    updateSurgery(s.id, { ekip: yeniEkip });
   }
-  function onEkipSelect(roleKey, ad) { const yeni = {...ekipState,[roleKey]:ad}; setEkipState(yeni); ekipKaydet(yeni); setAtamaModal(null); showToast(EKIP_LABELS_AD[roleKey]+` → ${ad} atandı ✓`); }
+  function onEkipSelect(roleKey, ad) { const eski = ekipState; const yeni = {...ekipState,[roleKey]:ad}; setEkipState(yeni); ekipKaydet(yeni, eski); setAtamaModal(null); showToast(EKIP_LABELS_AD[roleKey]+` → ${ad} atandı ✓`); }
   const [medyaKayit, setMedyaKayit]   = useState(false);
   const fileRef                       = useRef(null);
 
@@ -189,16 +201,10 @@ export default function AmeliyatDetay() {
 
   const dcfg = DURUM_CFG[s.durum] || DURUM_CFG['Bekliyor'];
   async function durumGuncelle(yeniDurum) {
-    const token = localStorage.getItem('operio_access');
-    try {
-      await fetch('http://localhost:4000/api/ameliyatlar/' + s.id, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-        body: JSON.stringify({ status: yeniDurum }),
-      });
-      updateSurgery(s.id, { durum: yeniDurum, st: yeniDurum==='Devam Ediyor'?'dot-active':yeniDurum==='Tamamlandi'?'dot-done':'dot-wait' });
-      showToast('Durum guncellendi');
-    } catch(e) { showToast('Hata'); }
+    const sonuc = await updateSurgeryStatus(s.id, STATUS_TO_BACKEND[yeniDurum]);
+    if (!sonuc) { showToast('Hata'); return; }
+    updateSurgery(s.id, { durum: yeniDurum, st: yeniDurum==='Devam Ediyor'?'dot-active':yeniDurum==='Tamamlandi'?'dot-done':'dot-wait' });
+    showToast('Durum guncellendi');
   }
   const ekipRows = Object.entries(s.ekip||{}).map(([key,val]) => ({ key, role:EKIP_LABELS[key]||key, name:val, color:EKIP_COLORS[key]||'#94A3B8' })).filter(r=>r.name&&r.name!=='—');
 
@@ -320,7 +326,7 @@ export default function AmeliyatDetay() {
             </div>
             {isHemsire && (
               <div style={{padding:'0 18px 14px',display:'flex',justifyContent:'flex-end'}}>
-                <button className="btn btn-primary btn-sm" onClick={()=>{ekipKaydet(ekipState);showToast('Ekip kaydedildi')}}>
+                <button className="btn btn-primary btn-sm" onClick={()=>{ekipKaydet(ekipState, s.ekip);showToast('Ekip kaydedildi')}}>
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{width:12,height:12}}><polyline points="20 6 9 17 4 12"/></svg>
                   Atamaları Kaydet
                 </button>

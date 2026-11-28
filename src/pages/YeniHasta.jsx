@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUIStore, useDataStore } from '../store';
+import { createPatient } from '../services/patientsAdapter.js';
 
 const INIT_FORM = {
   ad:'', soyad:'', tc:'', dogum:'', cinsiyet:'', kan:'', medeni:'',
@@ -71,20 +72,14 @@ export default function YeniHasta() {
     if (!form.ad || !form.soyad) { showToast('Ad ve soyad zorunludur'); return; }
     if (!form.tc || form.tc.length !== 11) { showToast('Geçerli TC kimlik numarası girin'); return; }
     try {
-      const token = localStorage.getItem('operio_access');
-      const res = await fetch('http://localhost:4000/api/hastalar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({
-          name: form.ad, surname: form.soyad, tc: form.tc,
-          birthDate: form.dogum || null, gender: form.cinsiyet === 'E' ? 'Erkek' : form.cinsiyet === 'K' ? 'Kadın' : '',
-          phone: form.tel, bloodType: form.kan, allergies: form.alerjiler, notes: form.notlar,
-          address: form.adres,
-        }),
+      const yeniHasta = await createPatient({
+        firstName: form.ad, lastName: form.soyad, tcNo: form.tc,
+        dateOfBirth: form.dogum ? new Date(form.dogum).toISOString() : null,
+        gender: form.cinsiyet || null,
+        phone: form.tel || null, bloodType: form.kan ? form.kan.replace(' Rh', '') : null,
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Hata');
-      addHasta({ id: data.id, ad: form.ad, soyad: form.soyad, tc: form.tc, tel: form.tel, kan: form.kan, cinsiyet: form.cinsiyet === 'E' ? 'Erkek' : 'Kadın', alerjiler: form.alerjiler, notlar: form.notlar });
+      if (!yeniHasta) throw new Error('Hasta kaydedilemedi');
+      addHasta({ id: yeniHasta.id, ad: form.ad, soyad: form.soyad, tc: form.tc, tel: form.tel, kan: form.kan, cinsiyet: form.cinsiyet === 'E' ? 'Erkek' : 'Kadın', alerjiler: form.alerjiler, notlar: form.notlar });
       showToast(taslak ? 'Taslak kaydedildi ✓' : 'Hasta başarıyla kaydedildi ✓');
       if (!taslak) navigate('/hastalar');
     } catch(e) {

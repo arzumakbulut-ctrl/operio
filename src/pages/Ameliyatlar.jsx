@@ -5,6 +5,8 @@ import AmeliyatDrawer from '../components/ui/AmeliyatDrawer';
 import HastaDrawer from '../components/ui/HastaDrawer';
 import { useNavigate } from 'react-router-dom';
 import { ROLES } from '../data/roles';
+import { createSurgery } from '../services/surgeriesAdapter';
+import { listPatients, createPatient } from '../services/patientsAdapter';
 
 // Orijinal HTML'deki AVCOLORS ve sabitler
 const ST_RENK  = { 'dot-active':'#059669', 'dot-wait':'#D97706', 'dot-done':'#94A3B8', 'dot-prep':'#0284C7' };
@@ -202,7 +204,7 @@ export default function Ameliyatlar() {
   const [dashTab, setDashTab] = useState('tumAmeliyatlar');
   const [ekleModal, setEkleModal] = useState(false);
   const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
-  const [ekleForm, setEkleForm] = useState({tip:'',hastaAd:'',tarih:today,saat:'08:00',bitis:'10:00',salon:'salon_1',notlar:''});
+  const [ekleForm, setEkleForm] = useState({tip:'',hastaAd:'',tarih:today,saat:'08:00',bitis:'10:00',salon:'',notlar:''});
   const [ekleLoading, setEkleLoading] = useState(false);
   const [aramaMetni, setAramaMetni] = useState('');
   const [durumFiltre, setDurumFiltre] = useState('Tumu');
@@ -242,20 +244,18 @@ export default function Ameliyatlar() {
     try {
       const token = localStorage.getItem('operio_access');
       // Once hasta bul veya olustur
-      const hastalarRes = await fetch('http://localhost:4000/api/hastalar', {
-        headers: { 'Authorization': 'Bearer ' + token }
-      });
-      const hastalarData = await hastalarRes.json();
-      let hasta = hastalarData.find(h => (h.name + ' ' + (h.surname||'')).trim().toLowerCase() === ekleForm.hastaAd.toLowerCase());
-      
+      const hastalarData = await listPatients();
+      let hasta = hastalarData.find(h => (h.ad + ' ' + (h.soyad||'')).trim().toLowerCase() === ekleForm.hastaAd.toLowerCase());
+
       if (!hasta) {
-        const adParts = ekleForm.hastaAd.split(' ');
-        const hRes = await fetch('http://localhost:4000/api/hastalar', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-          body: JSON.stringify({ name: adParts[0]||ekleForm.hastaAd, surname: adParts.slice(1).join(' ')||'' }),
-        });
-        hasta = await hRes.json();
+        const adParts = ekleForm.hastaAd.trim().split(/\s+/);
+        const ilkAd = adParts[0] || ekleForm.hastaAd;
+        // Backend lastName icin min 2 karakter zorunlu tutuyor (schemas.js:
+        // patientCreateSchema) - soyad girilmemisse adi tekrar kullaniyoruz,
+        // bos string gondermek 400 ile reddedilirdi.
+        const soyAd = adParts.slice(1).join(' ') || ilkAd;
+        hasta = await createPatient({ firstName: ilkAd, lastName: soyAd });
+        if (!hasta) throw new Error('Hasta olusturulamadi');
       }
 
       // Personel bul (doktor)
@@ -265,32 +265,31 @@ export default function Ameliyatlar() {
       const personelData = await personelRes.json();
       const doktor = personelData[0];
 
-      const res = await fetch('http://localhost:4000/api/ameliyatlar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-        body: JSON.stringify({
-          type: ekleForm.tip,
-          hastaId: hasta.id,
-          roomId: ekleForm.salon,
-          doctorId: doktor?.id || null,
-          date: new Date(ekleForm.tarih + 'T00:00:00'),
-          startTime: ekleForm.saat,
-          endTime: ekleForm.bitis,
-          status: 'Bekliyor',
-          notes: ekleForm.notlar,
-        }),
+      const yeni = await createSurgery({
+        title: ekleForm.tip,
+        patientId: hasta.id,
+        roomId: ekleForm.salon || null,
+        surgeonName: doktor?.name || undefined,
+        scheduledStart: new Date(ekleForm.tarih + 'T' + ekleForm.saat).toISOString(),
+        scheduledEnd: new Date(ekleForm.tarih + 'T' + ekleForm.bitis).toISOString(),
+        notes: ekleForm.notlar,
       });
-      if (!res.ok) throw new Error('Kayit hatasi');
-      const yeni = await res.json();
+      if (!yeni) throw new Error('Kayit hatasi');
+      // Minor Finding B (final review): bare POST .../surgeries yanıtı
+      // (RETURNING *, join yok) hasta/salon adını İÇERMEZ — mapSurgery bu
+      // yüzden hasta/salon'u boş string döner, yeni satır reload'a kadar
+      // boş görünürdü. Formda zaten elimizde olan hasta/salon bilgisiyle
+      // dolduruyoruz (adapter'a dokunulmadı, sadece bu fonksiyona lokal
+      // bir yama).
+      const salonAdi = (rooms || []).find(r => r.id === ekleForm.salon);
       addSurgery({
-        id: yeni.id, op: ekleForm.tip,
-        hasta: ekleForm.hastaAd, dr: doktor?.name || '',
-        salon: ekleForm.salon, saat: ekleForm.saat, bitis: ekleForm.bitis,
-        st: 'dot-wait', durum: 'Bekliyor', ekip: {}, setler: [], tags: [], tlbl: [],
+        ...yeni,
+        hasta: yeni.hasta || `${hasta.ad || ''} ${hasta.soyad || ''}`.trim(),
+        salon: yeni.salon || (salonAdi ? (salonAdi.ad || salonAdi.name || '') : ''),
       });
       showToast('Ameliyat eklendi');
       setEkleModal(false);
-      setEkleForm({tip:'',hastaAd:'',tarih:today,saat:'08:00',bitis:'10:00',salon:'salon_1',notlar:''});
+      setEkleForm({tip:'',hastaAd:'',tarih:today,saat:'08:00',bitis:'10:00',salon:'',notlar:''});
     } catch(e) { showToast('Hata: ' + e.message); }
     setEkleLoading(false);
   }
@@ -586,6 +585,7 @@ export default function Ameliyatlar() {
               <div className="fg" style={{marginBottom:12}}>
                 <label className="fl">SALON</label>
                 <select className="fi" value={ekleForm.salon} onChange={e=>setEkleForm(p=>({...p,salon:e.target.value}))}>
+                  <option value="">Salon seçin (opsiyonel)</option>
                   {rooms.map(r => <option key={r.id} value={r.id}>{r.ad||r.name}</option>)}
                 </select>
               </div>

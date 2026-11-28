@@ -188,14 +188,28 @@ export default function Profil() {
 
   async function sifreDegistir() {
     if (!sifreForm.yeni || sifreForm.yeni !== sifreForm.tekrar) { showToast('Yeni sifreler eslesmiyor'); return; }
-    if (sifreForm.yeni.length < 6) { showToast('Sifre en az 6 karakter olmali'); return; }
+    if (sifreForm.yeni.length < 8) { showToast('Sifre en az 8 karakter olmali'); return; }
     try {
-      const res = await fetch('http://localhost:4000/api/auth/change-password', {
+      // Gerçek backend #1 uç noktası: POST /api/security/password/change
+      // (security.routes.js) — currentPassword/newPassword/confirmPassword
+      // ÜÇÜ de zorunlu (confirmPassword backend şemasında .refine() ile
+      // newPassword'e eşitlik kontrolünden geçiyor). Backend ayrıca kendi
+      // validatePasswordStrength kurallarını da uyguluyor (8 karakterden daha
+      // fazlasını istiyor) — başarısız olursa 400 + error.message ile dönüyor.
+      const res = await fetch('http://localhost:4000/api/security/password/change', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-        body: JSON.stringify({ oldPassword: sifreForm.eski, newPassword: sifreForm.yeni }),
+        body: JSON.stringify({
+          currentPassword: sifreForm.eski,
+          newPassword:     sifreForm.yeni,
+          confirmPassword: sifreForm.tekrar,
+        }),
       });
-      if (!res.ok) { const d = await res.json(); showToast(d.error || 'Hata'); return; }
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        showToast(json?.error?.message || 'Hata');
+        return;
+      }
       showToast('Sifre basariyla degistirildi');
       setSifreModal(false);
       setSifreForm({ eski: '', yeni: '', tekrar: '' });
@@ -442,7 +456,7 @@ export default function Profil() {
           </div>
           <div className="fg" style={{marginBottom:12}}>
             <label className="fl">YENI SIFRE</label>
-            <input className="fi" type="password" value={sifreForm.yeni} onChange={e=>setSifreForm(p=>({...p,yeni:e.target.value}))} placeholder="En az 6 karakter"/>
+            <input className="fi" type="password" value={sifreForm.yeni} onChange={e=>setSifreForm(p=>({...p,yeni:e.target.value}))} placeholder="En az 8 karakter"/>
           </div>
           <div className="fg" style={{marginBottom:16}}>
             <label className="fl">YENI SIFRE (TEKRAR)</label>

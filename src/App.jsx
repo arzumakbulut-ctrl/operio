@@ -2,6 +2,10 @@ import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useSocket } from './hooks/useSocket';
 import { useAuthStore, useDataStore } from './store';
+import { listSurgeries } from './services/surgeriesAdapter.js';
+import { listPatients } from './services/patientsAdapter.js';
+import { listSterileSets } from './services/sterileSetsAdapter.js';
+import { DB_TO_UI } from './services/roomStatusMap.js';
 import AuthScreen from './components/auth/AuthScreen';
 import AppLayout from './components/layout/AppLayout';
 import Kiosk from './pages/Kiosk';
@@ -86,11 +90,14 @@ import AktiviteLoglari   from './pages/AktiviteLoglari';
 import SistemAyarlari    from './pages/SistemAyarlari';
 import WebsiteYonetimi   from './pages/WebsiteYonetimi';
 
-function mapSurgery(s){return{id:s.id,saat:s.startTime||"00:00",bitis:s.endTime||"",op:s.type||"",hasta:s.hasta?(s.hasta.name+" "+s.hasta.surname):"",dr:s.doctor?s.doctor.name:"",salon:s.room?s.room.name:"",tarih:s.date?new Date(s.date).toLocaleDateString("tr-TR"):"",tarihRaw:s.date||"",st:s.status==="Devam Ediyor"?"dot-active":s.status==="Tamamlandi"?"dot-done":"dot-wait",brans:"",sure:"",anestezi:"",durum:s.status||"Bekliyor",ekip:s.ekip||{},setler:[],malzeme:[],cihaz:[],ilac:[],tags:[],tlbl:[],hastaDetay:s.hasta||{}};}
-function mapHasta(h){return{id:h.id,ad:h.name||"",soyad:h.surname||"",yas:h.birthDate?new Date().getFullYear()-new Date(h.birthDate).getFullYear():"",cinsiyet:h.gender||"",tc:h.tc||"",tel:h.phone||"",kan:h.bloodType||"",alerjiler:h.allergies||"Yok",tani:"",asaSkor:"",agirlik:"",boy:"",son:"",op:"",notlar:h.notes||""};}
 function mapPersonel(p){return{id:p.id,ad:p.name||"",rol:p.specialty||"",specialty:p.specialty||"",r:p.specialty||"",av:(p.name||"").split(" ").map(function(w){return w[0]||"";}).join("").slice(0,2).toUpperCase(),bg:"#0284C7",durum:p.status||"Aktif",s:p.status||"Aktif",gun:0,tel:p.phone||"",email:p.email||"",sicil:"",uzmanlik:p.specialty||"",roleId:p.roleId||""};}
-function mapRoom(r){var m=r.name.match(/\d+/);return{id:r.id,ad:r.name,_sortNum:m?parseInt(m[0]):999,durum:r.status||"Bos",active:false,brans:"",op:"",ekip:[],time:"",kapasite:r.capacity||4,cihazlar:[]};}
-function mapSteril(s){return{id:s.id,ad:s.name,kod:s.code||"",adet:1,raf:s.location||"",durum:s.status||"Steril",sonSteril:s.lastSteril?new Date(s.lastSteril).toLocaleDateString("tr-TR"):"",kullanim:0};}
+// Final review Finding 2: önceden durum:r.status||"Bos" — "Bos" ölü bir
+// Türkçe literal (gerçek backend hiçbir zaman bu değeri döndürmez), r.status
+// da zaten büyük harfli ham enum ("ACTIVE" vb.) olduğu için hiçbir tüketici
+// bunu doğru şekilde okuyamıyordu. SalonYonetim.jsx'in (Task 6) kurduğu
+// DB_TO_UI eşlemesi (artık roomStatusMap.js'te paylaşılıyor) burada da
+// kullanılır.
+function mapRoom(r){var m=r.name.match(/\d+/);return{id:r.id,ad:r.name,_sortNum:m?parseInt(m[0]):999,durum:DB_TO_UI[r.status]||"idle",active:false,brans:"",op:"",ekip:[],time:"",kapasite:r.capacity||4,cihazlar:[]};}
 function useApiLoader(){
   const isLoggedIn=useAuthStore(function(s){return s.isLoggedIn;});
   const store=useDataStore();
@@ -100,20 +107,29 @@ function useApiLoader(){
     if(!token)return;
     var h={"Content-Type":"application/json","Authorization":"Bearer "+token};
     function get(path){return fetch("http://localhost:4000/api"+path,{headers:h}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});}
-    Promise.all([get("/ameliyatlar"),get("/hastalar"),get("/personel"),get("/rooms"),get("/steril"),get("/kurumlar"),get("/kurumlar/gruplar"),get("/cihazlar"),get("/cihazlar/bakim"),get("/cihazlar/ariza"),get("/finans/faturalar"),get("/finans/gelir-gider"),get("/notifications")]).then(function(results){
-      var a=results[0],h2=results[1],p=results[2],r=results[3],s=results[4],k=results[5],g=results[6],cih=results[7],bak=results[8],arz=results[9],fat=results[10],gg=results[11],notifs=results[12];
-      if(a&&a.length)store.loadSurgeries(a.map(mapSurgery));
-      if(h2&&h2.length)store.loadHastalar(h2.map(mapHasta));
+    Promise.all([listSurgeries(),listPatients(),get("/personel"),get("/rooms"),listSterileSets(),get("/kurumlar"),get("/kurumlar/gruplar"),get("/cihazlar"),get("/cihazlar/bakim"),get("/cihazlar/ariza"),get("/finans/faturalar"),get("/finans/gelir-gider"),get("/notifications")]).then(function(results){
+      var a=results[0],h2=results[1],p=results[2],rRaw=results[3],s=results[4],k=results[5],g=results[6],cih=results[7],bak=results[8],arz=results[9],fat=results[10],gg=results[11],notifsRaw=results[12];
+      // Final review Finding 2: get("/rooms") ve get("/notifications") ham
+      // {success,data,meta} zarfını hiç soymuyordu — r/notifs birer dizi değil
+      // obje olduğu için "r&&r.length" her zaman false'a düşüyor, loadRooms/
+      // loadBildirimler asla çalışmıyordu. Burada zarfı açıyoruz.
+      var r=(rRaw&&Array.isArray(rRaw.data))?rRaw.data:[];
+      var notifs=(notifsRaw&&Array.isArray(notifsRaw.data))?notifsRaw.data:[];
+      if(a&&a.length)store.loadSurgeries(a);
+      if(h2&&h2.length)store.loadHastalar(h2);
       if(p&&p.length)store.loadPersonel(p.map(mapPersonel));
       if(r&&r.length)store.loadRooms(r.map(mapRoom).sort(function(a,b){return a._sortNum-b._sortNum;}));
-      if(s&&s.length)store.loadSteril(s.map(mapSteril));
+      if(s&&s.length)store.loadSteril(s);
       if(k&&k.length)store.loadKurumlar(k.map(function(x){return{id:x.id,ad:x.name||"",tur:x.type||"",sehir:"",ilce:"",yatak:0,salonSayisi:0,kullaniciSayisi:0,durum:x.status||"Aktif",paket:"standard",abonelikBaslangic:"",abonelikBitis:"",aylikUcret:0,iletisimAd:"",iletisimTel:x.phone||"",iletisimEmail:x.email||"",grupId:x.groupId||""};}));
       if(g&&g.length)store.loadKurumGruplari(g.map(function(x){return{id:x.id,ad:x.name||"",tip:"",kurumIdler:(x.kurumlar||[]).map(function(k){return k.id;}),yetkiliAd:"",yetkiliEmail:"",toplamGelir:0,durum:"Aktif"};}));
       if(cih&&cih.length)store.loadCihazlar(cih.map(function(c){return{id:c.id,ad:c.name||"",kat:c.brand||"",sn:c.code||"",lok:c.location||"",durum:c.status||"Aktif",sonBakim:c.lastMaintDate?new Date(c.lastMaintDate).toLocaleDateString("tr-TR"):"",sonucBakim:c.nextMaintDate?new Date(c.nextMaintDate).toLocaleDateString("tr-TR"):"",kalibrasyon:"",garantiBitis:""};}));
       if(bak&&bak.length)store.loadBakimPlanlari(bak.map(function(b){return{id:b.id,cihaz:b.cihaz?b.cihaz.name:b.cihazId,tip:b.type||"Bakim",sure:"2 saat",teknisyen:"Teknisyen",tarih:b.plannedDate?new Date(b.plannedDate).toLocaleDateString("tr-TR"):"",durum:b.status||"Bekliyor",notes:b.notes||""};}));
       if(arz&&arz.length)store.loadArizalar(arz.map(function(a){return{id:a.id,cihaz:a.cihaz?a.cihaz.name:a.cihazId,bildiren:"Personel",tarih:a.createdAt?new Date(a.createdAt).toLocaleDateString("tr-TR"):"",aciklama:a.description||"",oncelik:a.severity||"Orta",durum:a.status||"Acik"};}));
       if(fat&&fat.length)store.loadFaturalar(fat.map(function(f){return{id:f.id,kurumId:f.hastaId||"",kurumAd:f.hasta?f.hasta.name+" "+f.hasta.surname:f.notes||"Fatura",tutar:f.amount||0,kesimTarihi:f.createdAt?new Date(f.createdAt).toLocaleDateString("tr-TR"):"",vadeTarihi:"",durum:f.status==="Odendi"?"Ödendi":f.status==="Gecikti"?"Gecikti":"Bekliyor",odemeTarihi:null};}));
-      if(notifs&&notifs.length)store.loadBildirimler(notifs.map(function(n){return{id:n.id,tip:n.type||"sistem",baslik:n.title||"",mesaj:n.message||"",zaman:n.createdAt?new Date(n.createdAt).toLocaleString("tr-TR"):"",okundu:n.read||false,kategori:"sistem"};}));
+      // Final review Finding 2: gerçek backend #1 satırları düz snake_case
+      // (migrations/001_init.sql:185-194 + notification.routes.js:20'nin bare
+      // SELECT *) — n.createdAt/n.read hiçbir zaman var olmayan alanlardı.
+      if(notifs&&notifs.length)store.loadBildirimler(notifs.map(function(n){return{id:n.id,tip:n.type||"sistem",baslik:n.title||"",mesaj:n.message||"",zaman:n.created_at?new Date(n.created_at).toLocaleString("tr-TR"):"",okundu:n.is_read||false,kategori:"sistem"};}));
       if(gg&&gg.length)store.loadGelirGider({items:gg,ozet:{aylikGelir:gg.filter(x=>x.type==='gelir').reduce((t,x)=>t+x.amount,0),aylikGider:gg.filter(x=>x.type==='gider').reduce((t,x)=>t+x.amount,0),netKar:0,buyumeOrani:12}});
     });
   },[isLoggedIn]);

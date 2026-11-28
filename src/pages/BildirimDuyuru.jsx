@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useAuthStore, useUIStore, useDataStore } from '../store';
 import { ROLES } from '../data/roles';
 
-const BASE = 'http://localhost:4000/api';
 const tok = () => localStorage.getItem('operio_access');
 
 const TIP_CFG = {
@@ -10,6 +9,12 @@ const TIP_CFG = {
   uyari:  { ic:'⚠️',  renk:'#D97706', bg:'rgba(217,119,6,0.1)',  lbl:'Uyarı' },
   bilgi:  { ic:'ℹ️',  renk:'#0284C7', bg:'rgba(2,132,199,0.1)', lbl:'Bilgilendirme' },
 };
+
+// UI tipi → gerçek backend #1 notificationCreateSchema enum'u
+// ('uyari'|'tamamlandi'|'katilim'|'sistem'). UI'da 'duyuru' ve 'bilgi' var ama
+// backend enum'unda karşılığı yok — ikisi de genel/bilgilendirici olduğu için
+// 'sistem'e eşlendi; 'uyari' zaten backend'de birebir var.
+const TIP_TO_BACKEND_TYPE = { duyuru:'sistem', bilgi:'sistem', uyari:'uyari' };
 const ONCELIK_RENK = { normal:'var(--slate-light)', yuksek:'#D97706', acil:'#DC2626' };
 
 export default function BildirimDuyuru() {
@@ -40,14 +45,25 @@ export default function BildirimDuyuru() {
     const yeni = { id:'D'+Date.now(), tip, ...form, tarih: 'Az önce', goruntulenme:0 };
     setLocalNew(prev => [yeni, ...prev]);
     setForm({ baslik:'', icerik:'', alici:'Tüm Kullanıcılar', oncelik:'normal' });
-    showToast('Bildirim gönderildi ✓');
     try {
-      await fetch(`${BASE}/notifications`, {
+      const res = await fetch('http://localhost:4000/api/notifications', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok()}` },
-        body: JSON.stringify({ baslik: form.baslik, mesaj: form.icerik, tip }),
+        body: JSON.stringify({
+          type:    TIP_TO_BACKEND_TYPE[tip] || 'sistem',
+          title:   form.baslik,
+          message: form.icerik,
+        }),
       });
-    } catch { /* optimistic */ }
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.success) {
+        showToast(json?.error?.message || 'Bildirim gönderilemedi');
+        return;
+      }
+      showToast('Bildirim gönderildi ✓');
+    } catch {
+      showToast('Bildirim gönderilemedi, bağlantı hatası');
+    }
   }
 
   function taslak() {

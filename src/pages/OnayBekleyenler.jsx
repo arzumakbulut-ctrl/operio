@@ -1,31 +1,66 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore, useUIStore } from '../store';
 import { ROLES } from '../data/roles';
+import { listSurgeries, updateSurgeryStatus, STATUS_TO_BACKEND } from '../services/surgeriesAdapter.js';
 
-const BASE = 'http://localhost:4000/api';
+// Bu sayfanın kendi talep-triyaj sözlüğü ('Onaylandi'/'Reddedildi') backend'in
+// gerçek ameliyat-durumu enum'u DEĞİL (WAITING|PREPARING|IN_PROGRESS|COMPLETED|
+// CANCELLED|POSTPONED).
+//
+// Final review Finding 1: önceden Onaylandi→WAITING yazılıyordu. Ama WAITING,
+// henüz hiç dokunulmamış/onaylanmamış bir ameliyatın da varsayılan durumu —
+// reload sonrası dbToTalep ikisini ayırt edemiyor, onaylanmış bir talep her
+// reload'da yeniden "Bekleyenler" sekmesine düşüyordu (bu dosyanın kendi
+// "onaylandi" tab'ı SADECE backend durumuna bakıyor, ayırt edici başka bir
+// alan yok — aşağıdaki dbToTalep'e bakınız). Onaylandi artık PREPARING
+// yazıyor: STATUS_TO_TR'de 'Hazırlanıyor' TR etiketine okunuyor, hem
+// WAITING'den ayırt edilebilir hem de "onay sonrası hazırlık aşaması"
+// olarak anlamlı bir karşılık.
+// Reddedildi→CANCELLED değişmedi (STATUS_TO_BACKEND['Iptal'] ile AYNI değer —
+// AmeliyatDetay.jsx'teki 'Iptal' seçeneğiyle tutarlı, Task 3'ün kendi fix'i);
+// burada STATUS_TO_BACKEND'den okunarak tek kaynaktan türetiliyor.
+const TALEP_DURUM_TO_BACKEND = { Onaylandi: 'PREPARING', Reddedildi: STATUS_TO_BACKEND['Iptal'] };
 
+// NOT: s.hasta/s.dr/s.tarihRaw/s.saat/s.bitis/s.salon/s.op/s.durum/s.hastaDetay
+// surgeriesAdapter.listSurgeries()'in Türkçe-eşlenmiş alan adlarıdır (bkz. Task 2).
+// s.doctor/s.surgeon_name/s.date/s.startTime/s.endTime/s.room/s.type/s.title/s.status
+// eski/ham backend şekli — adapter bu alanları üretmiyor, geriye dönük uyumluluk
+// için fallback olarak bırakıldı.
 function dbToTalep(s) {
-  const hastaAd = s.hasta ? `${s.hasta.name || ''} ${s.hasta.surname || ''}`.trim() : '—';
-  const drAd    = s.doctor?.name || s.surgeon_name || '—';
+  const hastaAd = typeof s.hasta === 'string'
+    ? (s.hasta || '—')
+    : (s.hasta ? `${s.hasta.name || ''} ${s.hasta.surname || ''}`.trim() : '—');
+  const drAd    = s.dr || s.doctor?.name || s.surgeon_name || '—';
   const drAv    = drAd.replace(/Dr\.\s*/,'').split(' ').map(w => w[0]||'').join('').slice(0,2).toUpperCase();
-  const tarihDt = s.date ? new Date(s.date) : null;
+  const tarihDt = (s.tarihRaw || s.date) ? new Date(s.tarihRaw || s.date) : null;
   const tarihStr = tarihDt ? tarihDt.toLocaleDateString('tr-TR') : '—';
   const olusturanStr = s.createdAt ? new Date(s.createdAt).toLocaleString('tr-TR') : tarihStr;
-  const durum = s.status === 'Bekliyor'    ? 'beklemede'
-    : s.status === 'Onaylandi'             ? 'onaylandi'
-    : s.status === 'Devam Ediyor'          ? 'onaylandi'
-    : s.status === 'Tamamlandi'            ? 'onaylandi'
-    : s.status === 'Reddedildi'            ? 'reddedildi'
+  const statusVal = s.durum || s.status;
+  // Final review Finding 1: 'Iptal' (CANCELLED'ın yeni okunan TR etiketi) ve
+  // 'Hazırlanıyor' (PREPARING'in TR etiketi) case'leri eklendi — aksi halde
+  // reddedilen/onaylanan bir talep reload sonrası tanınmayıp varsayılan
+  // 'beklemede'ye düşerdi. 'Onaylandi'/'Reddedildi' dead-case'leri (eski
+  // backend'in döndürdüğü, artık hiçbir zaman üretilmeyen TR string'leri)
+  // geriye dönük uyumluluk için zararsızca bırakıldı.
+  const durum = statusVal === 'Bekliyor'    ? 'beklemede'
+    : statusVal === 'Iptal'                 ? 'reddedildi'
+    : statusVal === 'Onaylandi'             ? 'onaylandi'
+    : statusVal === 'Devam Ediyor'          ? 'onaylandi'
+    : statusVal === 'Tamamlandi'            ? 'onaylandi'
+    : statusVal === 'Hazırlanıyor'          ? 'onaylandi'
+    : statusVal === 'Reddedildi'            ? 'reddedildi'
     : 'beklemede';
+  const saatVal  = s.saat || s.startTime || '—';
+  const bitisVal = s.bitis || s.endTime;
   return {
     id: s.id,
     doktor: drAd, doktorAv: drAv, doktorBg: '#DC2626',
-    op: s.type || s.title || '—',
-    hasta: { ad: hastaAd, yas: '—', tc: s.hasta?.tc || '—' },
+    op: s.op || s.type || s.title || '—',
+    hasta: { ad: hastaAd, yas: '—', tc: s.hastaDetay?.tc || s.hasta?.tc || '—' },
     tarih: tarihStr,
-    saat: s.startTime || '—',
-    sure: s.endTime ? `${s.startTime} – ${s.endTime}` : '—',
-    salon: s.room?.name || '—',
+    saat: saatVal,
+    sure: bitisVal ? `${saatVal} – ${bitisVal}` : '—',
+    salon: s.salon || s.room?.name || '—',
     anestezi: '—',
     kartAdi: '',
     malzeme: [], cihaz: [], ilac: [],
@@ -58,10 +93,8 @@ export default function OnayBekleyenler() {
   useEffect(() => {
     const token = localStorage.getItem('operio_access');
     if (!token) { setYukleniyor(false); return; }
-    fetch(`${BASE}/ameliyatlar`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : [])
-      .then(list => {
-        const data = Array.isArray(list) ? list : (list.data || []);
+    listSurgeries()
+      .then(data => {
         const mapped = data.map(dbToTalep);
         setTalepler(mapped);
         setBekleyenSayisi(mapped.filter(t => t.durum === 'beklemede').length);
@@ -120,8 +153,15 @@ export default function OnayBekleyenler() {
 
     if (!newDurum) return;
 
+    // Rollback için eski durumu sakla (DB çağrısı başarısız olursa geri alınır)
+    const eskiDurum          = t.durum;
+    const eskiTalepler       = talepler;
+    const eskiAktifTab       = aktifTab;
+    const eskiSelId          = selId;
+    const eskiNotAlan        = notAlan;
+    const eskiBekleyenSayisi = bekleyenSayisi;
+
     // Optimistic local update
-    const eskiDurum = t.durum;
     setTalepler(prev => prev.map(x => x.id !== id ? x : {
       ...x, durum: newDurum, not: not || x.not,
       log: [...x.log, logEntry],
@@ -131,20 +171,25 @@ export default function OnayBekleyenler() {
     setNotAlan('');
 
     // Sidebar badge güncelle
-    if ((eskiDurum === 'beklemede' || eskiDurum === 'duzeltme') && newDurum !== 'beklemede' && newDurum !== 'duzeltme') {
+    const badgeDegisti = (eskiDurum === 'beklemede' || eskiDurum === 'duzeltme') && newDurum !== 'beklemede' && newDurum !== 'duzeltme';
+    if (badgeDegisti) {
       setBekleyenSayisi(Math.max(0, bekleyenSayisi - 1));
     }
 
-    // DB güncelle (sadece onay ve red için)
+    // DB güncelle (sadece onay ve red için — 'duzelt' local-only triyaj durumu,
+    // ameliyat durumu değil, bu yüzden DB çağrısı yapılmaz)
     if (dbStatus) {
-      const token = localStorage.getItem('operio_access');
-      try {
-        await fetch(`${BASE}/ameliyatlar/${id}`, {
-          method: 'PUT',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: dbStatus }),
-        });
-      } catch (_) {}
+      const sonuc = await updateSurgeryStatus(id, TALEP_DURUM_TO_BACKEND[dbStatus]);
+      if (!sonuc) {
+        // DB güncellemesi başarısız oldu — optimistic update'i geri al
+        setTalepler(eskiTalepler);
+        setAktifTab(eskiAktifTab);
+        setSelId(eskiSelId);
+        setNotAlan(eskiNotAlan);
+        if (badgeDegisti) setBekleyenSayisi(eskiBekleyenSayisi);
+        showToast('Hata');
+        return;
+      }
     }
 
     showToast(

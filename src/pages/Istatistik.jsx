@@ -1,24 +1,22 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore, useUIStore } from '../store';
+import { listSurgeries } from '../services/surgeriesAdapter.js';
 
 export default function Istatistik() {
   const { curRole } = useAuthStore();
   const { showToast } = useUIStore();
-  const token = localStorage.getItem('operio_access');
   const [stats, setStats] = useState({ total: 0, active: 0, bekliyor: 0, tamamlandi: 0 });
   const [ameliyatlar, setAmeliyatlar] = useState([]);
 
   useEffect(() => {
-    fetch('http://localhost:4000/api/ameliyatlar', {
-      headers: { 'Authorization': 'Bearer ' + token }
-    }).then(r => r.ok ? r.json() : [])
+    listSurgeries()
       .then(data => {
         setAmeliyatlar(data);
         setStats({
           total: data.length,
-          active: data.filter(a => a.status === 'Devam Ediyor').length,
-          bekliyor: data.filter(a => a.status === 'Bekliyor').length,
-          tamamlandi: data.filter(a => a.status === 'Tamamlandi').length,
+          active: data.filter(a => a.durum === 'Devam Ediyor').length,
+          bekliyor: data.filter(a => a.durum === 'Bekliyor').length,
+          tamamlandi: data.filter(a => a.durum === 'Tamamlandi').length,
         });
       }).catch(() => {});
   }, []);
@@ -31,7 +29,7 @@ export default function Istatistik() {
   const opData = (() => {
     const counts = Array(12).fill(0);
     ameliyatlar.forEach(s => {
-      if (s.date) counts[new Date(s.date).getMonth()]++;
+      if (s.tarihRaw) counts[new Date(s.tarihRaw).getMonth()]++;
     });
     if (counts.every(v => v === 0)) {
       counts[new Date().getMonth()] = ameliyatlar.length;
@@ -50,7 +48,7 @@ export default function Istatistik() {
     ];
     const typeMap = {};
     ameliyatlar.forEach(s => {
-      const t = s.type || 'Diğer';
+      const t = s.op || 'Diğer';
       typeMap[t] = (typeMap[t] || 0) + 1;
     });
     const total = ameliyatlar.length || 1;
@@ -77,10 +75,10 @@ export default function Istatistik() {
     const salonMap = {};
     const total = ameliyatlar.length || 1;
     ameliyatlar.forEach(s => {
-      const ad = s.room?.name || '—';
+      const ad = s.salon || '—';
       if (!salonMap[ad]) salonMap[ad] = { count:0, types:[] };
       salonMap[ad].count++;
-      if (s.type) salonMap[ad].types.push(s.type);
+      if (s.op) salonMap[ad].types.push(s.op);
     });
     return Object.entries(salonMap)
       .sort((a,b) => {

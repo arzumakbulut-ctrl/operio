@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuthStore, useUIStore } from '../../store';
 import { useNavigate } from 'react-router-dom';
+import { assignTeamMember, removeTeamMember } from '../../services/surgeriesAdapter';
 
 const DURUM_CFG = {
   'Devam Ediyor': { tag:'t-green',  barColor:'#059669' },
@@ -158,15 +159,23 @@ export default function AmeliyatDrawer({ surgery: s, onClose }) {
       .catch(() => {});
   }, []);
 
+  // Eski kod `{ekip: ekipState}` ile PUT /ameliyatlar/:id çağırıyordu (nonexistent
+  // route). Backend'de ekip ataması ayrı uçlar üzerinden kişi bazlı yapılıyor, o
+  // yüzden değişen/çıkarılan her rol için ayrı assignTeamMember/removeTeamMember
+  // çağrılır. personelListesi şu an backend'de /personel ucu bulunmadığı için
+  // genelde boş geliyor — bu durumda ilgili rol için eşleşme bulunamaz ve o rol
+  // sessizce atlanır (ayrı, bu planın kapsamı dışında bir personel-kablolama sorunu).
   async function kaydetEkip() {
-    try {
-      await fetch(`${BASE}/ameliyatlar/${s.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok()}` },
-        body: JSON.stringify({ ekip: ekipState }),
-      });
-      showToast('Ekip ataması kaydedildi ✓');
-    } catch { showToast('Kayıt hatası'); }
+    for (const [roleKey, ad] of Object.entries(ekipState)) {
+      if (!ad || ad === '—') continue;
+      const eskiAd = s.ekip?.[roleKey];
+      if (eskiAd === ad) continue;
+      const eskiPersonel = eskiAd ? personelListesi.find(p => p.ad === eskiAd) : null;
+      if (eskiPersonel) await removeTeamMember(s.id, eskiPersonel.id);
+      const yeniPersonel = personelListesi.find(p => p.ad === ad);
+      if (yeniPersonel) await assignTeamMember(s.id, yeniPersonel.id, roleKey);
+    }
+    showToast('Ekip ataması kaydedildi ✓');
   }
 
   if (!s) return null;

@@ -47,8 +47,25 @@ export default function Raporlar() {
   const [loglar, setLoglar] = useState([]);
   useEffect(() => {
     const tok = () => localStorage.getItem('operio_access');
-    fetch('http://localhost:4000/api/logs?limit=5', { headers: { Authorization: `Bearer ${tok()}` } })
-      .then(r => r.json()).then(d => { if (d?.items?.length) setLoglar(d.items); }).catch(() => {});
+    // Gerçek backend #1 uç noktası: GET /api/audit — {success,data:[],meta} zarfı,
+    // satırlar düz (nested .user yok) snake_case DB kolonları: action, resource,
+    // resource_id, created_at, full_name (LEFT JOIN users).
+    fetch('http://localhost:4000/api/audit?limit=5', { headers: { Authorization: `Bearer ${tok()}` } })
+      .then(r => r.json().catch(() => null).then(json => ({ status: r.status, json })))
+      .then(({ status, json }) => {
+        if (!json?.success) {
+          // Final review Finding 5: GET /api/audit sadece Üst Yönetici'ye
+          // açık — diğer roller için backend 403/FORBIDDEN döner. Bu gerçek
+          // bir hata değil, rol bazlı görünürlük kısıtı; sessizce boş liste
+          // göster, toast GÖSTERME (diğer tüm hata türlerinde toast
+          // göstermeye devam et).
+          if (status === 403 || json?.error?.code === 'FORBIDDEN') { setLoglar([]); return; }
+          showToast(json?.error?.message || 'Aktivite günlüğü yüklenemedi');
+          return;
+        }
+        setLoglar(Array.isArray(json.data) ? json.data : []);
+      })
+      .catch(() => showToast('Aktivite günlüğü yüklenemedi'));
   }, []);
 
   const now = new Date();
@@ -173,11 +190,11 @@ export default function Raporlar() {
           <div className="istat-block-title">Son Rapor Aktiviteleri</div>
           {loglar.length === 0 && <div style={{ fontSize:12, color:'var(--slate-light)', padding:'8px 0' }}>Henüz aktivite kaydı yok.</div>}
           {loglar.map((l,i) => {
-            const ad = l.user?.name || 'Sistem';
+            const ad = l.full_name || 'Sistem';
             const av = ad.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
             const BGLIST = ['#14B8A6','#0284C7','#7C3AED','#EA580C','#059669','#DC2626'];
             const bg = BGLIST[ad.charCodeAt(0) % BGLIST.length];
-            const t = new Date(l.createdAt).toLocaleString('tr-TR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+            const t = new Date(l.created_at).toLocaleString('tr-TR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
             return (
               <div key={l.id || i} className="nitem" style={{ padding:'9px 8px' }}>
                 <div className="avatar" style={{ background:bg, color:'white', width:30, height:30, fontSize:10, flexShrink:0 }}>{av}</div>
