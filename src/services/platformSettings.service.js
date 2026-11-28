@@ -49,8 +49,15 @@ async function updateSettings({ data, actorId, req }) {
 
   const newData = Object.fromEntries(keys.map((k) => [k, data[k]]));
   await auditPlatformAdmin({
+    // resourceId: null, 1 DEĞİL (Review Focus — Finding 1): platform_admin_audit_logs.
+    // resource_id UUID'dir (migrations/002_platform_admin.sql); literal 1 Postgres'in
+    // 22P02 (invalid input syntax for type uuid) hatasına çarpar — auditPlatformAdmin
+    // bunu yakalayıp sadece console.error yapar (audit()'in AYNI yakala-ve-logla
+    // deseni), yani HER ayar değişikliği sessizce denetimsiz kalırdı. resourceId
+    // burada gereksiz: `resource: 'platform_settings'` tek satırı (id=1) zaten
+    // benzersiz şekilde tanımlıyor, kolon NOT NULL da değil.
     adminId: actorId, action: 'UPDATE', resource: 'platform_settings',
-    resourceId: 1, oldData: old, newData, req,
+    resourceId: null, oldData: old, newData, req,
   });
 
   return settings;
