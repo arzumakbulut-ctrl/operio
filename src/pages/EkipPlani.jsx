@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAuthStore, useUIStore, useDataStore } from '../store';
 import { listSurgeries, assignTeamMember, removeTeamMember } from '../services/surgeriesAdapter.js';
+
 const AV_RENKLER = ['#EA580C','#0284C7','#F59E0B','#7C3AED','#059669','#DC2626','#14B8A6'];
 function avRenk(ad) { let h=0; for(let c of (ad||'')) h=(h*31+c.charCodeAt(0))&0xffff; return AV_RENKLER[h%AV_RENKLER.length]; }
 
