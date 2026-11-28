@@ -10,6 +10,8 @@ import { vi, beforeAll, afterAll, afterEach } from 'vitest';
 process.env.NODE_ENV          = 'test';
 process.env.JWT_ACCESS_SECRET  = 'test-access-secret-minimum-32-chars-long!!';
 process.env.JWT_REFRESH_SECRET = 'test-refresh-secret-minimum-32-chars-long!';
+process.env.PLATFORM_ADMIN_ACCESS_SECRET  = 'test-pa-access-secret-minimum-32-chars-long!!';
+process.env.PLATFORM_ADMIN_REFRESH_SECRET = 'test-pa-refresh-secret-minimum-32-chars-long!';
 process.env.DATABASE_URL       = 'postgresql://test:test@localhost/test_db';
 process.env.ANTHROPIC_API_KEY  = 'test-key';
 process.env.IYZICO_API_KEY     = 'test-iyzico';

@@ -7,6 +7,7 @@ const rateLimit  = require('express-rate-limit');
 const { RATE_LIMIT, CSP, HEADERS } = require('./config/security');
 const { sanitizeMiddleware }        = require('./utils/sanitize');
 const authRoutes     = require('./routes/auth.routes');
+const platformAdminAuthRoutes = require('./routes/platformAdminAuth.routes');
 const surgeryRoutes  = require('./routes/surgery.routes');
 const securityRoutes = require('./routes/security.routes');
 const aiRoutes       = require('./routes/ai.routes');
@@ -135,6 +136,7 @@ app.get('/health', (req, res) => {
 
 // ── API ROUTE'LARI ───────────────────────────────────────────
 app.use('/api/auth',         authRoutes);
+app.use('/api/platform-admin/auth', platformAdminAuthRoutes);
 app.use('/api/surgeries',    surgeryRoutes);
 app.use('/api/patients',     patientRouter);
 app.use('/api/rooms',        roomRouter);

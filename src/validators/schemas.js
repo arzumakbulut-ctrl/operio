@@ -21,6 +21,14 @@ const refreshSchema = z.object({
   refreshToken: z.string().min(1, 'Refresh token gerekli'),
 });
 
+// ── PLATFORM ADMIN AUTH ─────────────────────────────────────
+// Hastane loginSchema'sından BİLEREK ayrı — roleId alanı burada anlamsız
+// (platform-admin kimliği groupSlug ile belirlenir, roleId/institutionId YOK).
+const platformAdminLoginSchema = z.object({
+  email:    z.string().email('Geçerli bir e-posta girin').max(200, 'E-posta 200 karakterden uzun olamaz'),
+  password: z.string().min(6, 'Şifre en az 6 karakter olmalı'),
+});
+
 // ── AMELIYAT ────────────────────────────────────────────────
 const surgeryCreateSchema = z.object({
   roomId:         z.string().uuid().optional().nullable(),
@@ -211,6 +219,7 @@ module.exports = {
   loginSchema,
   registerSchema,
   refreshSchema,
+  platformAdminLoginSchema,
   surgeryCreateSchema,
   surgeryUpdateSchema,
   patientCreateSchema,
