@@ -20,6 +20,18 @@ process.env.STRIPE_SECRET_KEY  = 'sk_test_placeholder';
 
 // ── DB MOCK ───────────────────────────────────────────────────
 // Gerçek PostgreSQL bağlantısı yerine mock kullanır
+//
+// NOT (Review Focus — Finding 5 araştırması sırasında doğrulandı): bu `vi.mock`,
+// bir test dosyasının KENDİSİNİN DOĞRUDAN import ETMEDİĞİ, servis kodu içinden
+// dolaylı (`require('../utils/db')`) bir bağımlılığa ASLA ulaşmıyor — repo'daki
+// HİÇBİR test bunu bu şekilde kullanmıyor (`global.mockDBQuery`'nin tek çağrı
+// noktası `kioskService.recordTimeoutRead.test.js`'in KENDİ yorumunda bunu
+// açıkça belgeliyor). Bu yüzden `middleware/platformAdminAuth.js`'in yeni
+// gerçek-zamanlı hesap-durumu kontrolü (bkz. o middleware'in kendi yorumu) test
+// dosyalarında BURADAN DEĞİL, her entegrasyon testinin KENDİ `registry.register
+// ('platformAdminAccount', ...)` mock'undan besleniyor (institutionGroups/
+// institutions/platformAdminAccounts/platformSettings/supportTickets.routes.
+// test.js'in her birinde — bu kod tabanının ZATEN kurulu DI deseni).
 const mockQueryFn = vi.fn();
 const mockTransactionFn = vi.fn();
 

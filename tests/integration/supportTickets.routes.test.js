@@ -20,9 +20,20 @@ const mockService = {
   addComment:   vi.fn(),
 };
 
+// Review Focus — Finding 5: `authenticatePlatformAdmin` artık HER istekte
+// `registry.get('platformAdminAccount', ...)`'u `getActiveAccountById(sub)` ile
+// çağırıp hesabın GÜNCEL is_active/group_slug'unu DB'den (burada: mock'tan) okur
+// (bkz. institutionGroups.routes.test.js'in AYNI deseni).
+const mockPlatformAdminAccountService = { getActiveAccountById: vi.fn() };
+
 beforeEach(() => {
   vi.clearAllMocks();
   registry.register('supportTicket', mockService);
+  registry.register('platformAdminAccount', mockPlatformAdminAccountService);
+  mockPlatformAdminAccountService.getActiveAccountById.mockImplementation(async (id) => {
+    const m = /^admin-(super|destek|finans|icerik)$/.exec(id);
+    return m ? { is_active: true, group_slug: m[1] } : null;
+  });
 });
 
 const tok = (groupSlug) => signPlatformAdminAccessToken({
@@ -73,12 +84,37 @@ describe('Kurum Talepleri', () => {
 
     it('status/type/institutionId query filtreleri servise geçer', async () => {
       mockService.listTickets.mockResolvedValueOnce({ tickets: [], total: 0, page: 1, limit: 20, totalPages: 0 });
-      await request.get('/api/platform-admin/support-tickets?status=OPEN&type=BILLING&institutionId=inst1')
+      // institutionId artık .uuid() ile doğrulanıyor (Minor Finding B) — 'inst1' gibi
+      // bir UUID OLMAYAN değer artık 400'e çarpardı, bu yüzden burada gerçek bir UUID
+      // kullanılıyor.
+      const uuid = '11111111-1111-1111-1111-111111111111';
+      await request.get(`/api/platform-admin/support-tickets?status=OPEN&type=BILLING&institutionId=${uuid}`)
         .set('Authorization', `Bearer ${superToken}`);
       const callArg = mockService.listTickets.mock.calls[0][0];
       expect(callArg.status).toBe('OPEN');
       expect(callArg.type).toBe('BILLING');
-      expect(callArg.institutionId).toBe('inst1');
+      expect(callArg.institutionId).toBe(uuid);
+    });
+
+    it('geçersiz status değeri (örn. ?status=bogus) → 400, servis hiç çağrılmaz (Minor Finding B)', async () => {
+      const res = await request.get('/api/platform-admin/support-tickets?status=bogus')
+        .set('Authorization', `Bearer ${superToken}`);
+      expect(res.status).toBe(400);
+      expect(mockService.listTickets).not.toHaveBeenCalled();
+    });
+
+    it('geçersiz type değeri → 400, servis hiç çağrılmaz (Minor Finding B)', async () => {
+      const res = await request.get('/api/platform-admin/support-tickets?type=bogus')
+        .set('Authorization', `Bearer ${superToken}`);
+      expect(res.status).toBe(400);
+      expect(mockService.listTickets).not.toHaveBeenCalled();
+    });
+
+    it('UUID olmayan institutionId → 400, servis hiç çağrılmaz (Minor Finding B)', async () => {
+      const res = await request.get('/api/platform-admin/support-tickets?institutionId=not-a-uuid')
+        .set('Authorization', `Bearer ${superToken}`);
+      expect(res.status).toBe(400);
+      expect(mockService.listTickets).not.toHaveBeenCalled();
     });
 
     it('servis hatası → 500', async () => {

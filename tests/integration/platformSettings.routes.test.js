@@ -14,9 +14,20 @@ const mockService = {
   updateSettings: vi.fn(),
 };
 
+// Review Focus — Finding 5: `authenticatePlatformAdmin` artık HER istekte
+// `registry.get('platformAdminAccount', ...)`'u `getActiveAccountById(sub)` ile
+// çağırıp hesabın GÜNCEL is_active/group_slug'unu DB'den (burada: mock'tan) okur
+// (bkz. institutionGroups.routes.test.js'in AYNI deseni).
+const mockPlatformAdminAccountService = { getActiveAccountById: vi.fn() };
+
 beforeEach(() => {
   vi.clearAllMocks();
   registry.register('platformSettings', mockService);
+  registry.register('platformAdminAccount', mockPlatformAdminAccountService);
+  mockPlatformAdminAccountService.getActiveAccountById.mockImplementation(async (id) => {
+    const m = /^admin-(super|destek|finans|icerik)$/.exec(id);
+    return m ? { is_active: true, group_slug: m[1] } : null;
+  });
 });
 
 const tok = (groupSlug) => signPlatformAdminAccessToken({

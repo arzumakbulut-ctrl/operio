@@ -16,11 +16,22 @@ const mockService = {
   listAccounts:  vi.fn(),
   createAccount: vi.fn(),
   updateAccount: vi.fn(),
+  // Review Focus — Finding 5: `authenticatePlatformAdmin` artık HER istekte bu
+  // servisin `getActiveAccountById(sub)`'unu çağırıp hesabın GÜNCEL is_active/
+  // group_slug'unu okur (bkz. institutionGroups.routes.test.js'in AYNI deseni) —
+  // bu dosya SERVİSİ ZATEN TAMAMEN mock'ladığı için (diğer 4 dosyadaki gibi
+  // registry'ye düşüp GERÇEK servise ulaşmak yerine), bu metod da AYNI mock
+  // nesnesine eklenir.
+  getActiveAccountById: vi.fn(),
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
   registry.register('platformAdminAccount', mockService);
+  mockService.getActiveAccountById.mockImplementation(async (id) => {
+    const m = /^admin-(super|destek|finans|icerik)$/.exec(id);
+    return m ? { is_active: true, group_slug: m[1] } : null;
+  });
 });
 
 const tok = (groupSlug) => signPlatformAdminAccessToken({

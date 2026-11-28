@@ -326,12 +326,30 @@ async function updateAccount({ id, data, actorId, req }) {
   return safe;
 }
 
+/**
+ * getActiveAccountById — bir platform-admin hesabının AN'daki (DB'deki GERÇEK,
+ * JWT payload'ındaki OLASI BAYAT değer DEĞİL) `is_active` + `group_slug` durumunu
+ * döner. `middleware/platformAdminAuth.js`'in `authenticatePlatformAdmin`'i TARAFINDAN
+ * HER İSTEKTE kullanılır (Review Focus — Finding 5): deaktif edilmiş ya da 'super'
+ * grubundan başka bir gruba taşınmış bir hesap, erişim token'ının süresi dolana kadar
+ * (varsayılan 15 dk) tam yetkisini korumamalı. Platform-admin trafiği doğası gereği
+ * düşük hacimli (binlerce istek/sn DEĞİL, bir avuç hesap) — bu yüzden istek başına bu
+ * ekstra sorgu kabul edilebilir bir maliyet.
+ */
+async function getActiveAccountById(id) {
+  const { rows } = await db.query(
+    'SELECT is_active, group_slug FROM platform_admins WHERE id=$1', [id]
+  );
+  return rows[0] ?? null;
+}
+
 module.exports = {
   GROUP_SLUGS,
   listGroups,
   listAccounts,
   createAccount,
   updateAccount,
+  getActiveAccountById,
   // Test-only export — platformAdminAccountService.updateAccount.test.js'in gerçek
   // politika kontrolüyle (validatePasswordStrength) tutarlılığı doğrulaması için.
   generateTemporaryPassword,

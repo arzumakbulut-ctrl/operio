@@ -17,9 +17,20 @@ const mockService = {
   setInstitutionStatus: vi.fn(),
 };
 
+// Review Focus — Finding 5: `authenticatePlatformAdmin` artık HER istekte
+// `registry.get('platformAdminAccount', ...)`'u `getActiveAccountById(sub)` ile
+// çağırıp hesabın GÜNCEL is_active/group_slug'unu DB'den (burada: mock'tan) okur
+// (bkz. institutionGroups.routes.test.js'in AYNI deseni).
+const mockPlatformAdminAccountService = { getActiveAccountById: vi.fn() };
+
 beforeEach(() => {
   vi.clearAllMocks();
   registry.register('institution', mockService);
+  registry.register('platformAdminAccount', mockPlatformAdminAccountService);
+  mockPlatformAdminAccountService.getActiveAccountById.mockImplementation(async (id) => {
+    const m = /^admin-(super|destek|finans|icerik)$/.exec(id);
+    return m ? { is_active: true, group_slug: m[1] } : null;
+  });
 });
 
 const tok = (groupSlug) => signPlatformAdminAccessToken({
@@ -132,6 +143,20 @@ describe('POST /api/platform-admin/institutions', () => {
   it('contactName yok → 400', async () => {
     const res = await request.post('/api/platform-admin/institutions').set('Authorization', `Bearer ${superToken}`).send({ name: 'X', email: 'x@test.tr' });
     expect(res.status).toBe(400);
+  });
+
+  it('contactName 100 karakterden uzun → 400 (users.full_name VARCHAR(100) — Minor Finding A)', async () => {
+    const res = await request.post('/api/platform-admin/institutions').set('Authorization', `Bearer ${superToken}`)
+      .send({ ...payload, contactName: 'A'.repeat(101), email: 'uzun@test-hastane.tr' });
+    expect(res.status).toBe(400);
+    expect(mockService.createInstitution).not.toHaveBeenCalled();
+  });
+
+  it('contactName tam 100 karakter → kabul edilir (sınır değer)', async () => {
+    mockService.createInstitution.mockResolvedValueOnce({ id: 'inst1', name: 'Test Hastanesi' });
+    const res = await request.post('/api/platform-admin/institutions').set('Authorization', `Bearer ${superToken}`)
+      .send({ ...payload, contactName: 'A'.repeat(100), email: 'tam100@test-hastane.tr' });
+    expect(res.status).toBe(201);
   });
 
   it('email yok → 400', async () => {
