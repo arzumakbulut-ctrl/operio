@@ -13,19 +13,24 @@ import path from 'path';
  * `tests/unit/authService.institutionActive.test.js` / `kioskService.*` —
  * `vi.mock` does not reach a nested `require()` from real service code here.
  * `institution.service.js` also pulls in `password.js`, `platformAdminAudit.js`,
- * `subscription.service.js` and (via that) `audit.js` — all of which do their OWN
+ * `subscription.service.js`, `platformSettings.service.js` (Review Focus Finding 3 —
+ * `resolveTrialDays`) and (via that) `audit.js` — all of which do their OWN
  * `require('./db')` at module-load time, so their cache entries are cleared too,
  * not just `institution.service.js`'s own.
  */
 const nodeRequire = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
-const dbPath                   = path.resolve(here, '../../src/utils/db.js');
-const institutionServicePath   = path.resolve(here, '../../src/services/institution.service.js');
-const passwordPath             = path.resolve(here, '../../src/utils/password.js');
-const platformAdminAuditPath   = path.resolve(here, '../../src/utils/platformAdminAudit.js');
-const subscriptionServicePath  = path.resolve(here, '../../src/services/subscription.service.js');
-const auditPath                = path.resolve(here, '../../src/utils/audit.js');
-const DEPENDENT_PATHS = [institutionServicePath, passwordPath, platformAdminAuditPath, subscriptionServicePath, auditPath];
+const dbPath                      = path.resolve(here, '../../src/utils/db.js');
+const institutionServicePath      = path.resolve(here, '../../src/services/institution.service.js');
+const passwordPath                = path.resolve(here, '../../src/utils/password.js');
+const platformAdminAuditPath      = path.resolve(here, '../../src/utils/platformAdminAudit.js');
+const subscriptionServicePath     = path.resolve(here, '../../src/services/subscription.service.js');
+const platformSettingsServicePath = path.resolve(here, '../../src/services/platformSettings.service.js');
+const auditPath                   = path.resolve(here, '../../src/utils/audit.js');
+const DEPENDENT_PATHS = [
+  institutionServicePath, passwordPath, platformAdminAuditPath,
+  subscriptionServicePath, platformSettingsServicePath, auditPath,
+];
 
 describe('institution.service — createInstitution: startTrial commit SONRASI başarısız olursa (require.cache ile db enjeksiyonu)', () => {
   let callLog;
@@ -129,5 +134,79 @@ describe('institution.service — createInstitution: startTrial commit SONRASI b
 
     expect(result.trialStarted).toBe(true);
     expect(result.trialError).toBeUndefined();
+  });
+
+  /**
+   * Review Focus — Finding 3: trial süresi artık sabit 14 DEĞİL, `platform_settings.
+   * trial_days`'den okunuyor (platformSettings.service.js'in GERÇEK `getSettings`'i
+   * — "gerçek fonksiyon, don't reimplement its logic"). Aksi halde Task 6'nın PATCH
+   * /platform-settings ile düzenlettiği bu alan tamamen dekoratif kalırdı.
+   */
+  it('startTrial, platform_settings.trial_days\'in GERÇEK (sabit 14 DEĞİL) değeriyle çağrılır', async () => {
+    const startTrialCalls = [];
+    const fakeQuery = vi.fn(async (sql, params) => {
+      if (/SELECT id FROM users WHERE email/i.test(sql)) return { rows: [] };
+      if (/INSERT INTO institutions/i.test(sql)) return { rows: [{ id: 'inst-settings', name: params[0] }] };
+      if (/INSERT INTO users/i.test(sql)) return { rows: [{ id: 'user-settings', email: params[0] }] };
+      if (/INSERT INTO platform_admin_audit_logs/i.test(sql)) return { rows: [] };
+      if (/SELECT \* FROM platform_settings WHERE id=1/i.test(sql)) {
+        return { rows: [{ id: 1, platform_name: 'Operio', trial_days: 30 }] };
+      }
+      if (/FROM subscriptions s[\s\S]*JOIN plans p/i.test(sql)) return { rows: [] };
+      if (/INSERT INTO subscriptions/i.test(sql)) {
+        startTrialCalls.push(params);
+        return { rows: [{ id: 'sub-settings', institution_id: 'inst-settings', plan_slug: params[1], trial_ends_at: params[2] }] };
+      }
+      if (/INSERT INTO audit_logs/i.test(sql)) return { rows: [] };
+      return { rows: [] };
+    });
+
+    const { createInstitution } = loadWithFakeQuery(fakeQuery);
+
+    const before = Date.now();
+    await createInstitution({
+      data: { name: 'Test Hastanesi 3', contactName: 'Zeynep', email: 'zeynep@test3.tr' },
+      actorId: 'admin-1', req: {},
+    });
+
+    expect(startTrialCalls).toHaveLength(1);
+    // subscriptions INSERT: ($1 institutionId, $2 planSlug, $3 trialEndsAt, ...) —
+    // trialEndsAt, startTrial içinde `new Date(); setDate(getDate() + trialDays)` ile
+    // hesaplanır — 30 günlük bir fark (eski sabit 14 DEĞİL) ~30 gün sonrasına denk gelmeli.
+    const trialEndsAt = startTrialCalls[0][2];
+    const daysFromNow = (trialEndsAt.getTime() - before) / (1000 * 60 * 60 * 24);
+    expect(daysFromNow).toBeGreaterThan(29);
+    expect(daysFromNow).toBeLessThan(31);
+  });
+
+  it('platform_settings satırı okunamazsa (getSettings null döner) ESKİ sabit 14 güne düşülür', async () => {
+    const startTrialCalls = [];
+    const fakeQuery = vi.fn(async (sql, params) => {
+      if (/SELECT id FROM users WHERE email/i.test(sql)) return { rows: [] };
+      if (/INSERT INTO institutions/i.test(sql)) return { rows: [{ id: 'inst-fallback', name: params[0] }] };
+      if (/INSERT INTO users/i.test(sql)) return { rows: [{ id: 'user-fallback', email: params[0] }] };
+      if (/INSERT INTO platform_admin_audit_logs/i.test(sql)) return { rows: [] };
+      if (/SELECT \* FROM platform_settings WHERE id=1/i.test(sql)) return { rows: [] }; // beklenmeyen: satır yok
+      if (/FROM subscriptions s[\s\S]*JOIN plans p/i.test(sql)) return { rows: [] };
+      if (/INSERT INTO subscriptions/i.test(sql)) {
+        startTrialCalls.push(params);
+        return { rows: [{ id: 'sub-fallback', institution_id: 'inst-fallback', plan_slug: params[1], trial_ends_at: params[2] }] };
+      }
+      if (/INSERT INTO audit_logs/i.test(sql)) return { rows: [] };
+      return { rows: [] };
+    });
+
+    const { createInstitution } = loadWithFakeQuery(fakeQuery);
+
+    const before = Date.now();
+    await createInstitution({
+      data: { name: 'Test Hastanesi 4', contactName: 'Can', email: 'can@test4.tr' },
+      actorId: 'admin-1', req: {},
+    });
+
+    const trialEndsAt = startTrialCalls[0][2];
+    const daysFromNow = (trialEndsAt.getTime() - before) / (1000 * 60 * 60 * 24);
+    expect(daysFromNow).toBeGreaterThan(13);
+    expect(daysFromNow).toBeLessThan(15);
   });
 });

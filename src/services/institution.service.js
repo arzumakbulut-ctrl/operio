@@ -3,6 +3,19 @@ const db     = require('../utils/db');
 const { hashPassword } = require('../utils/password');
 const { auditPlatformAdmin } = require('../utils/platformAdminAudit');
 const { startTrial, getSubscription, getPlan } = require('./subscription.service');
+const { getSettings } = require('./platformSettings.service');
+
+// DENEME SÜRESİ (Review Focus — Finding 3): sabit `trialDays: 14` yerine
+// `platform_settings.trial_days` okunur (Task 6'nın PATCH /platform-settings'i bu
+// alanı super'e düzenletir — okunmazsa ayar tamamen dekoratif kalırdı). `getSettings()`
+// tek satırı (id=1) migration'da seed edildiği için normalde her zaman döner; yine de
+// `settings` null/undefined DÖNERSE ya da `trial_days` hiç yoksa (beklenmeyen durum)
+// ESKİ sabit değere (14) düşülür — "gerçek fonksiyon, don't reimplement its logic"
+// ilkesiyle tutarlı, platformSettings.service.js'in KENDİ getSettings'i kullanılır.
+async function resolveTrialDays() {
+  const settings = await getSettings();
+  return settings?.trial_days ?? 14;
+}
 
 async function listInstitutions({ page = 1, limit = 20 } = {}) {
   const offset = (page - 1) * limit;
@@ -29,8 +42,9 @@ async function getInstitution({ id }) {
 }
 
 /**
- * createInstitution — kurum + ilk kullanıcı (role_id=0, Üst Yönetici) + 14 günlük trial
- * aboneliği oluşturur.
+ * createInstitution — kurum + ilk kullanıcı (role_id=0, Üst Yönetici) + `platform_settings.
+ * trial_days`'e (varsayılan 14) göre bir trial aboneliği oluşturur (bkz. `resolveTrialDays` —
+ * Review Focus Finding 3).
  *
  * E-posta çarpışması: `users.email` UNIQUE'tir ve ilk kullanıcı TAM OLARAK data.email
  * ile oluşturulur. Çarpışma, transaction BAŞLAMADAN ÖNCE kontrol edilir — normal akışta
@@ -129,7 +143,8 @@ async function createInstitution({ data, actorId, req }) {
   let trialStarted = true;
   let trialError;
   try {
-    await startTrial({ institutionId: institution.id, planSlug: 'pro', trialDays: 14 });
+    const trialDays = await resolveTrialDays();
+    await startTrial({ institutionId: institution.id, planSlug: 'pro', trialDays });
   } catch (err) {
     trialStarted = false;
     trialError = err.message;
@@ -234,7 +249,8 @@ async function updateInstitution({ id, data, actorGroupSlug, actorId, req }) {
       // durumda (bkz. createInstitution'daki trialStarted:false yolu) bu PATCH'in
       // sessizce no-op olmaması için: abonelik hiç yoksa, istenen planSlug ile
       // yeniden başlatılır.
-      await startTrial({ institutionId: id, planSlug, trialDays: 14 });
+      const trialDays = await resolveTrialDays();
+      await startTrial({ institutionId: id, planSlug, trialDays });
     }
   }
 

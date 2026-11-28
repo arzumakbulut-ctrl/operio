@@ -16,13 +16,17 @@ import path from 'path';
  */
 const nodeRequire = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
-const dbPath                  = path.resolve(here, '../../src/utils/db.js');
-const institutionServicePath  = path.resolve(here, '../../src/services/institution.service.js');
-const passwordPath            = path.resolve(here, '../../src/utils/password.js');
-const platformAdminAuditPath  = path.resolve(here, '../../src/utils/platformAdminAudit.js');
-const subscriptionServicePath = path.resolve(here, '../../src/services/subscription.service.js');
-const auditPath               = path.resolve(here, '../../src/utils/audit.js');
-const DEPENDENT_PATHS = [institutionServicePath, passwordPath, platformAdminAuditPath, subscriptionServicePath, auditPath];
+const dbPath                      = path.resolve(here, '../../src/utils/db.js');
+const institutionServicePath      = path.resolve(here, '../../src/services/institution.service.js');
+const passwordPath                = path.resolve(here, '../../src/utils/password.js');
+const platformAdminAuditPath      = path.resolve(here, '../../src/utils/platformAdminAudit.js');
+const subscriptionServicePath     = path.resolve(here, '../../src/services/subscription.service.js');
+const platformSettingsServicePath = path.resolve(here, '../../src/services/platformSettings.service.js');
+const auditPath                   = path.resolve(here, '../../src/utils/audit.js');
+const DEPENDENT_PATHS = [
+  institutionServicePath, passwordPath, platformAdminAuditPath,
+  subscriptionServicePath, platformSettingsServicePath, auditPath,
+];
 
 describe('institution.service — updateInstitution: planSlug plans tablosuna karşı doğrulanır', () => {
   let callLog;
@@ -32,8 +36,9 @@ describe('institution.service — updateInstitution: planSlug plans tablosuna ka
     DEPENDENT_PATHS.forEach((p) => delete nodeRequire.cache[p]);
   });
 
-  function loadWithFakeDb({ planExists, hasExistingSubscription }) {
+  function loadWithFakeDb({ planExists, hasExistingSubscription, trialDays = 14 }) {
     callLog = [];
+    const insertSubscriptionParams = [];
     const fakeQuery = vi.fn(async (sql, params) => {
       if (/SELECT \* FROM plans WHERE slug/i.test(sql)) {
         callLog.push('get-plan');
@@ -55,8 +60,15 @@ describe('institution.service — updateInstitution: planSlug plans tablosuna ka
         callLog.push('update-subscription-plan_slug');
         return { rows: [] };
       }
+      // Review Focus — Finding 3: startTrial'ın bootstrap fallback yolu artık
+      // platform_settings.trial_days'i okur (resolveTrialDays, institution.service.js).
+      if (/SELECT \* FROM platform_settings WHERE id=1/i.test(sql)) {
+        callLog.push('get-platform-settings');
+        return { rows: [{ id: 1, trial_days: trialDays }] };
+      }
       if (/INSERT INTO subscriptions/i.test(sql)) {
         callLog.push('insert-subscription');
+        insertSubscriptionParams.push(params);
         return { rows: [{ id: 'sub-new', institution_id: 'inst-1', plan_slug: params[1] }] };
       }
       if (/INSERT INTO platform_admin_audit_logs/i.test(sql)) {
@@ -76,7 +88,7 @@ describe('institution.service — updateInstitution: planSlug plans tablosuna ka
       exports: { query: fakeQuery, transaction: vi.fn() },
     };
     DEPENDENT_PATHS.forEach((p) => delete nodeRequire.cache[p]);
-    return nodeRequire(institutionServicePath);
+    return { ...nodeRequire(institutionServicePath), insertSubscriptionParams };
   }
 
   it('geçersiz planSlug → 400 fırlatılır, subscriptions üzerinde HİÇBİR UPDATE/INSERT çalışmaz', async () => {
@@ -114,6 +126,25 @@ describe('institution.service — updateInstitution: planSlug plans tablosuna ka
     expect(callLog).toContain('get-plan');
     expect(callLog).toContain('insert-subscription');
     expect(callLog).not.toContain('update-subscription-plan_slug');
+  });
+
+  it('Review Focus Finding 3: bootstrap fallback\'taki startTrial, platform_settings.trial_days\'in GERÇEK değeriyle (sabit 14 DEĞİL) çağrılır', async () => {
+    const { updateInstitution, insertSubscriptionParams } = loadWithFakeDb({
+      planExists: true, hasExistingSubscription: false, trialDays: 45,
+    });
+
+    const before = Date.now();
+    await updateInstitution({
+      id: 'inst-1', data: { planSlug: 'business' }, actorGroupSlug: 'super', actorId: 'admin-1', req: {},
+    });
+
+    expect(callLog).toContain('get-platform-settings');
+    expect(insertSubscriptionParams).toHaveLength(1);
+    // subscriptions INSERT: ($1 institutionId, $2 planSlug, $3 trialEndsAt, ...)
+    const trialEndsAt = insertSubscriptionParams[0][2];
+    const daysFromNow = (trialEndsAt.getTime() - before) / (1000 * 60 * 60 * 24);
+    expect(daysFromNow).toBeGreaterThan(44);
+    expect(daysFromNow).toBeLessThan(46);
   });
 
   it('finans dışı alan + geçersiz planSlug birlikte gönderilse: finans kısıtlaması HER ZAMAN önce kontrol edilir (400, plan doğrulaması hiç çalışmaz)', async () => {
