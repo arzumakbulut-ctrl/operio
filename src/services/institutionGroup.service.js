@@ -95,12 +95,33 @@ async function assignInstitution({ groupId, institutionId, actorId, req }) {
   });
 }
 
-async function removeInstitution({ institutionId, actorId, req }) {
-  await db.query('UPDATE institutions SET group_id=NULL WHERE id=$1', [institutionId]);
+/**
+ * removeInstitution — URL'deki `groupId` (DELETE /:groupId/institutions/:institutionId)
+ * kurumun GERÇEK `group_id`'i ile eşleşmezse (kurum zaten o grupta değil, groupId
+ * eski/yanlış, ya da grup hiç yok) sessizce başarıya dönmez: `WHERE id=$1 AND
+ * group_id=$2` ile tek bir atomik UPDATE hem "bu kurum bu grupta mı" kontrolünü hem
+ * de çıkarma işlemini aynı sorguda yapar (check-then-update iki adımındaki race'i
+ * önler) — 0 satır dönerse 409 fırlatılır, institutions'ta HİÇBİR satır değişmez.
+ * Audit'in `resourceId`'i `groupId` (kapsam/parent id) — `surgery.service.js`'in
+ * `removeTeamMember`'ının `resourceId: surgeryId` kullandığı AYNI emsal (review
+ * finding: önceki sürüm `resourceId: null` ile hangi gruptan çıkarıldığını
+ * kalıcı olarak kaybediyordu).
+ */
+async function removeInstitution({ groupId, institutionId, actorId, req }) {
+  const { rows } = await db.query(
+    'UPDATE institutions SET group_id=NULL WHERE id=$1 AND group_id=$2 RETURNING id',
+    [institutionId, groupId]
+  );
+  if (!rows.length) {
+    throw Object.assign(
+      new Error('Kurum bu grupta değil'),
+      { statusCode: 409 }
+    );
+  }
 
   await auditPlatformAdmin({
     adminId: actorId, action: 'REMOVE', resource: 'institution_group',
-    resourceId: null, newData: { institutionId }, req,
+    resourceId: groupId, newData: { institutionId }, req,
   });
 }
 

@@ -72,7 +72,8 @@ router.post('/:groupId/institutions/:institutionId', authorizePlatformAdmin('sup
 router.delete('/:groupId/institutions/:institutionId', authorizePlatformAdmin('super'), async (req, res) => {
   try {
     await getService().removeInstitution({
-      institutionId: req.params.institutionId, actorId: req.platformAdmin.sub, req,
+      groupId: req.params.groupId, institutionId: req.params.institutionId,
+      actorId: req.platformAdmin.sub, req,
     });
     return ok(res, { message: 'Kurum gruptan çıkarıldı' });
   } catch (err) { return mapError(res, err); }

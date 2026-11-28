@@ -187,15 +187,25 @@ describe('Kurum Grupları CRUD', () => {
   });
 
   describe('DELETE /api/platform-admin/institution-groups/:groupId/institutions/:institutionId', () => {
-    it('bir kurumu gruptan çıkarma servis çağrısı yapılır', async () => {
+    it('bir kurumu gruptan çıkarma servis çağrısı yapılır, URL\'deki groupId servise GEÇER', async () => {
       mockService.removeInstitution.mockResolvedValueOnce();
       const res = await request.delete('/api/platform-admin/institution-groups/grp1/institutions/inst1')
         .set('Authorization', `Bearer ${superToken}`);
       expect(res.status).toBe(200);
       expect(mockService.removeInstitution).toHaveBeenCalledOnce();
       const callArg = mockService.removeInstitution.mock.calls[0][0];
+      expect(callArg.groupId).toBe('grp1');
       expect(callArg.institutionId).toBe('inst1');
       expect(callArg.actorId).toBe('admin-super');
+    });
+
+    it('kurum URL\'deki groupId\'de DEĞİLSE (başka bir grupta ya da groupId yok) → servis 409 fırlatır, route 409 döner', async () => {
+      mockService.removeInstitution.mockRejectedValueOnce(
+        Object.assign(new Error('Kurum bu grupta değil'), { statusCode: 409 })
+      );
+      const res = await request.delete('/api/platform-admin/institution-groups/grp-wrong/institutions/inst1')
+        .set('Authorization', `Bearer ${superToken}`);
+      expect(res.status).toBe(409);
     });
 
     it('finans/destek/icerik erişemez (sadece super)', async () => {
