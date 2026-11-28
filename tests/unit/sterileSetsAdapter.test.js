@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { listSterileSets, createSterileSet, updateSterileSet } from '../../src/services/sterileSetsAdapter.js';
+import { listSterileSets, createSterileSet, updateSterileSet, getLastError } from '../../src/services/sterileSetsAdapter.js';
 
 const BASE = 'http://localhost:4000/api';
 beforeEach(() => { localStorage.setItem('operio_access','test-token'); global.fetch = vi.fn(); });
@@ -14,7 +14,9 @@ describe('listSterileSets', () => {
 
     const result = await listSterileSets();
 
-    expect(global.fetch).toHaveBeenCalledWith(`${BASE}/sterile-sets`, expect.objectContaining({
+    // Finding 3: query param yoksa backend limit'i varsayılan 20'ye düşürüyor
+    // — ?limit=100 şemanın izin verdiği maksimum gönderilmeli.
+    expect(global.fetch).toHaveBeenCalledWith(`${BASE}/sterile-sets?limit=100`, expect.objectContaining({
       headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
     }));
     expect(result[0]).toMatchObject({ id:'ss1', name:'Laparoskopi Seti', raf:'Raf A-3', durum:'Steril — Hazır' });
@@ -45,5 +47,27 @@ describe('createSterileSet / updateSterileSet', () => {
     global.fetch.mockResolvedValueOnce({ ok:true, json: async () => ({ success:true, data:{ id:'ss1', status:'IN_USE' } }) });
     await updateSterileSet('ss1', { status: 'IN_USE' });
     expect(global.fetch).toHaveBeenCalledWith(`${BASE}/sterile-sets/ss1`, expect.objectContaining({ method:'PATCH' }));
+  });
+});
+
+// Final review Finding 4: apiCall "asla fırlatmaz" sözleşmesini korur (null
+// döner) ama artık son başarısız çağrının gerçek {code,message} nesnesini
+// getLastError() üzerinden açığa çıkarıyor — SterilSetler.jsx'in saveSet()'i
+// bunu hardcoded 'Hata' yerine toast'ta göstermek için kullanıyor.
+describe('getLastError (Finding 4)', () => {
+  it('backend {success:false,error:{message}} dönerse getLastError() bu mesajı verir', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: false, status: 500,
+      json: async () => ({ success:false, error:{ code:'INTERNAL_SERVER_ERROR', message:'duplicate key value violates unique constraint' } }),
+    });
+    const result = await createSterileSet({ code:'SET-003', name:'Çakışan Set' });
+    expect(result).toBeNull();
+    expect(getLastError()).toEqual({ code:'INTERNAL_SERVER_ERROR', message:'duplicate key value violates unique constraint' });
+  });
+
+  it('başarılı bir çağrı sonrası getLastError() null döner', async () => {
+    global.fetch.mockResolvedValueOnce({ ok:true, json: async () => ({ success:true, data:{ id:'ss9', code:'SET-009', name:'X', status:'STERILE' } }) });
+    await createSterileSet({ code:'SET-009', name:'X' });
+    expect(getLastError()).toBeNull();
   });
 });

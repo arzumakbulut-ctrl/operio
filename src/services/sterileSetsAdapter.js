@@ -48,6 +48,15 @@ function mapSet(s) {
   };
 }
 
+// Finding 4: apiCall "asla fırlatmaz" sözleşmesini korumak için hatayı
+// null dönerek yutuyor — ama bu, çağıran kodun backend'in GERÇEK hata
+// mesajını (ör. unique-constraint ihlali) göstermesini engelliyordu.
+// Son başarısız çağrının {code,message} nesnesini burada saklıyoruz; adapter
+// hâlâ fırlatmıyor/null dönüyor, sadece isteyen çağıran getLastError() ile
+// mesajı okuyabiliyor.
+let lastError = null;
+export function getLastError() { return lastError; }
+
 // Asla fırlatmaz: hata durumunda loglayıp null döner.
 async function apiCall(method, path, body) {
   let res;
@@ -61,17 +70,22 @@ async function apiCall(method, path, body) {
     json = await res.json();
   } catch (err) {
     console.error('[sterileSetsAdapter]', method, path, 'network/parse error', err);
+    lastError = { code: 'NETWORK_ERROR', message: 'Sunucuya bağlanılamadı' };
     return null;
   }
   if (!res.ok || !json?.success) {
     console.error('[sterileSetsAdapter]', method, path, res.status, json?.error);
+    lastError = json?.error || null;
     return null;
   }
+  lastError = null;
   return json;
 }
 
 export async function listSterileSets() {
-  const result = await apiCall('GET', '/sterile-sets');
+  // Finding 3: query param yoksa backend paginationSchema limit'i varsayılan
+  // 20'ye düşüyor — ?limit=100 şemanın izin verdiği maksimum.
+  const result = await apiCall('GET', '/sterile-sets?limit=100');
   if (!Array.isArray(result?.data)) return [];
   return result.data.map(mapSet);
 }

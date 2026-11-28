@@ -1,7 +1,26 @@
 import { useState, useRef, useEffect } from 'react';
 import { useDataStore, useUIStore, useAuthStore } from '../store';
 import Modal from '../components/ui/Modal';
-import { listSterileSets, createSterileSet, updateSterileSet, TR_TO_STATUS } from '../services/sterileSetsAdapter.js';
+import { listSterileSets, createSterileSet, updateSterileSet, getLastError, TR_TO_STATUS } from '../services/sterileSetsAdapter.js';
+
+// Final review Finding 4: backend'in sterile_sets.code kolonu
+// VARCHAR(50) UNIQUE NOT NULL (migrations/001_init.sql:128) — ve bu
+// dosyadaki "doktor" alanı Task 7/8'den beri kasıtlı olarak bu kodu taşıyor
+// (sterileSetsAdapter.js:mapSet'in doktor←code eşlemesi). Aynı doktor adıyla
+// (ya da paylaşılan "Genel Kullanım" varsayılanıyla) ikinci bir set
+// oluşturmak/düzenlemek gerçek bir unique-constraint ihlaline (500) yol
+// açardı. Mevcut listeye karşı kontrol edip çakışma varsa okunabilir bir
+// sayaç soneki ekliyoruz — mapSet'in doktor←code eşlemesinden sonra da
+// anlaşılır kalır (ör. "Dr. Ayşe #2").
+function benzersizKod(doktor, mevcutListe, haricTut) {
+  const kullanilan = new Set(
+    mevcutListe.filter(s => s.id !== haricTut).map(s => s.doktor)
+  );
+  if (!kullanilan.has(doktor)) return doktor;
+  let n = 2;
+  while (kullanilan.has(`${doktor} #${n}`)) n++;
+  return `${doktor} #${n}`;
+}
 
 // ── İKONLAR (HTML ICONS'tan) ─────────────────────────────────
 const IC_SET   = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:12,height:12}}><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>;
@@ -46,6 +65,13 @@ export default function SterilSetler() {
   const [modalOpen,setModalOpen]= useState(false);
   const [editId,   setEditId]   = useState(null);
   const [form,     setForm]     = useState({ name:'', doktor:'', raf:'', durum:'Steril — Hazır', aletler:[{ad:'',adet:1},{ad:'',adet:1}] });
+  // Minor Finding A (final review): backend'in updateSet() servisi
+  // instruments alanını PATCH'te kabul etmiyor — edit sırasında alet listesi
+  // değişse de backend'e asla yazılmıyor (services/sterileSet.service.js:76,
+  // `const { instruments, ...setData } = data;`). Edit açılırken alet
+  // listesinin ORİJİNAL halini saklıyoruz, kaydederken değişip değişmediğini
+  // tespit edip kullanıcıyı buna göre uyarmak için.
+  const [editOrijinalAletler, setEditOrijinalAletler] = useState(null);
 
   const filtered = setler.filter(s =>
     s.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -65,9 +91,12 @@ export default function SterilSetler() {
     setExcelFile(null);
     if (id) {
       const s = setler.find(x => x.id === id);
-      setForm({ name:s.name, doktor:s.doktor, raf:s.raf, durum:s.durum, aletler:s.aletler.map(a=>({ad:a.ad,adet:a.adet||1})) });
+      const aletSnapshot = s.aletler.map(a=>({ad:a.ad,adet:a.adet||1}));
+      setForm({ name:s.name, doktor:s.doktor, raf:s.raf, durum:s.durum, aletler:aletSnapshot });
+      setEditOrijinalAletler(aletSnapshot);
     } else {
       setForm({ name:'', doktor:'', raf:'', durum:'Steril — Hazır', aletler:[{ad:'',adet:1},{ad:'',adet:1}] });
+      setEditOrijinalAletler(null);
     }
     setModalOpen(true);
   }
@@ -107,13 +136,16 @@ export default function SterilSetler() {
     const name = form.name.trim();
     if (!name) { showToast('Set adı zorunlu'); return; }
     const doktor = form.doktor.trim() || 'Genel Kullanım';
+    // Finding 4: backend'in UNIQUE code kolonuyla çakışmayı önlemek için
+    // gönderilecek kodu mevcut listeye karşı benzersizleştir.
+    const code = benzersizKod(doktor, setler, editId);
     const raf    = form.raf.trim() || 'A-1';
     const aletler = form.aletler
       .filter(a => a.ad.trim())
       .map(a => ({ ad:a.ad.trim(), adet:Number(a.adet)||1, raf }));
     const payload = {
       name,
-      code: doktor,
+      code,
       shelfLocation: raf,
       status: TR_TO_STATUS[form.durum] || 'STERILE',
       instruments: aletler.map(a => ({ name:a.ad, expectedCount:a.adet })),
@@ -122,14 +154,26 @@ export default function SterilSetler() {
     try {
       if (editId) {
         const result = await updateSterileSet(editId, payload);
-        if (!result) throw new Error('Hata');
-        setSetler(prev => prev.map(x => x.id===editId ? { ...x, name, doktor, raf, durum:form.durum, aletler } : x));
+        // Finding 4: hardcoded 'Hata' yerine backend'in gerçek
+        // {success:false,error:{code,message}} zarfındaki mesajı göster.
+        if (!result) throw new Error(getLastError()?.message || 'Set güncellenemedi');
+        // Minor Finding A: alet listesi değiştiyse, backend bunu PATCH'te
+        // kalıcı olarak YOK SAYDIĞI için kullanıcıyı başarı mesajında
+        // bilgilendir — "güncellendi ✓" yanıltıcı olmasın. Karşılaştırma
+        // sadece ad/adet'e bakar — `aletler`'in kendi `raf` alanı var,
+        // orijinal snapshot'ta yok; `raf`'ı dahil etseydik liste HİÇ
+        // değişmese bile her zaman "değişti" sonucu çıkardı.
+        const sadeAdAdet = (liste) => (liste || []).map(a => ({ ad:a.ad, adet:a.adet }));
+        const aletlerDegisti = JSON.stringify(sadeAdAdet(aletler)) !== JSON.stringify(sadeAdAdet(editOrijinalAletler));
+        setSetler(prev => prev.map(x => x.id===editId ? { ...x, name, doktor:code, raf, durum:form.durum, aletler } : x));
         setSelId(editId);
-        showToast('Set güncellendi ✓');
+        showToast(aletlerDegisti
+          ? 'Set güncellendi — alet listesi değişikliği bu sürümde kaydedilmiyor (bilinen backend kısıtı) ✓'
+          : 'Set güncellendi ✓');
       } else {
         const result = await createSterileSet(payload);
-        if (!result) throw new Error('Hata');
-        const newSet = { id:result.id, name, doktor, raf, durum:form.durum, color:COLORS[setler.length%6], aletler };
+        if (!result) throw new Error(getLastError()?.message || 'Set oluşturulamadı');
+        const newSet = { id:result.id, name, doktor:code, raf, durum:form.durum, color:COLORS[setler.length%6], aletler };
         setSetler(prev => [...prev, newSet]);
         setSelId(result.id);
         showToast('Set oluşturuldu ✓');
