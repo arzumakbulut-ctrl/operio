@@ -137,6 +137,18 @@ async function main() {
     console.log(`✅ ${SURGERIES.length} demo ameliyat`);
   }
 
+  // Platform admin (ilk süper yönetici hesabı)
+  const PLATFORM_ADMIN_EMAIL = 'super@operio.com';
+  const PLATFORM_ADMIN_PASSWORD = 'PlatformAdmin123!'; // demo/geliştirme — prod'da env'den okunmalı
+  const hash = await bcrypt.hash(PLATFORM_ADMIN_PASSWORD, 12);
+  await pool.query(
+    `INSERT INTO platform_admins (email, password_hash, full_name, group_slug)
+     VALUES ($1,$2,'Operio Süper Yönetici','super')
+     ON CONFLICT (email) DO UPDATE SET full_name=EXCLUDED.full_name`,
+    [PLATFORM_ADMIN_EMAIL, hash]
+  );
+  console.log('✅ Platform admin: super@operio.com');
+
   console.log('\n🎉 Seed tamamlandı!');
   console.log('\nDemo giriş bilgileri:');
   console.log('  admin@hastane.tr   / Admin123!  → Üst Yönetici');

@@ -21,6 +21,14 @@ const refreshSchema = z.object({
   refreshToken: z.string().min(1, 'Refresh token gerekli'),
 });
 
+// ── PLATFORM ADMIN AUTH ─────────────────────────────────────
+// Hastane loginSchema'sından BİLEREK ayrı — roleId alanı burada anlamsız
+// (platform-admin kimliği groupSlug ile belirlenir, roleId/institutionId YOK).
+const platformAdminLoginSchema = z.object({
+  email:    z.string().email('Geçerli bir e-posta girin').max(200, 'E-posta 200 karakterden uzun olamaz'),
+  password: z.string().min(6, 'Şifre en az 6 karakter olmalı'),
+});
+
 // ── AMELIYAT ────────────────────────────────────────────────
 const surgeryCreateSchema = z.object({
   roomId:         z.string().uuid().optional().nullable(),
@@ -94,13 +102,99 @@ const roomStatusSchema = z.object({
 });
 
 // ── KURUM ────────────────────────────────────────────────────
+// email BİLEREK zorunlu (orijinal şemada optional/nullable idi): platform-admin'in
+// POST /api/platform-admin/institutions ile kurum oluşturduğu akışta bu adres aynı
+// zamanda otomatik oluşturulan ilk kullanıcının (role_id=0) login e-postası olur
+// (bkz. institution.service.js'in createInstitution'ı) — bu route'tan geçen her
+// oluşturma isteği bir bootstrap e-postası gerektirir.
 const institutionCreateSchema = z.object({
-  name:    z.string().min(3).max(200),
-  type:    z.string().max(100).optional(),
-  address: z.string().max(500).optional().nullable(),
-  phone:   z.string().max(20).optional().nullable(),
-  email:   z.string().email().optional().nullable(),
+  name:        z.string().min(3).max(200),
+  type:        z.string().max(100).optional(),
+  address:     z.string().max(500).optional().nullable(),
+  phone:       z.string().max(20).optional().nullable(),
+  email:       z.string().email('Geçerli bir e-posta girin').max(200),
+  bedCount:    z.number().int().positive().optional().nullable(),
+  city:        z.string().max(100).optional().nullable(),
+  district:    z.string().max(100).optional().nullable(),
+  // max(100), 200 DEĞİL: bootstrap transaction'ı bu değeri users.full_name'e yazar
+  // (institution.service.js'in createInstitution'ı) ve o kolon VARCHAR(100)'dür
+  // (migrations/001_init.sql) — 200'e kadar izin vermek, transaction İÇİNDE bir
+  // Postgres 22001 (value too long) hatasına (temiz bir 400 DEĞİL) yol açardı.
+  contactName: z.string().min(2, 'Yetkili adı en az 2 karakter olmalı').max(100),
 });
+
+const institutionUpdateSchema = institutionCreateSchema.partial().extend({
+  // planSlug institutions tablosunun bir kolonu DEĞİL — bu kurumun en son aboneliğinin
+  // (subscriptions.plan_slug) değerini günceller. Finans grubu PATCH /:id'de SADECE
+  // bunu gönderebilir (bkz. institution.service.js'in updateInstitution'ı).
+  planSlug: z.string().min(1).max(50).optional(),
+});
+
+const institutionStatusSchema = z.object({
+  isActive: z.boolean(),
+});
+
+// ── KURUM GRUBU (Hastane Zinciri) ───────────────────────────
+// POST (createGroup) ve PATCH (updateGroup) için AYNI şema — ikisi de service
+// katmanında `name`'i doğrudan ve zorunlu alır (bkz. institutionGroup.service.js).
+const institutionGroupCreateSchema = z.object({
+  name: z.string().min(2, 'Grup adı en az 2 karakter olmalı').max(200),
+});
+
+// ── PLATFORM-ADMIN HESABI ────────────────────────────────────
+// groupSlug sabit 4 değerle sınırlı — migrations/002_platform_admin.sql'in seed'i
+// (super/destek/finans/icerik) ile AYNI 4 slug; platformAdminAccount.service.js'in
+// listGroups'u da sabit bu 4 satırı bekler, burada yeni bir slug kabul etmek
+// servis tarafında karşılığı olmayan bir grup_slug'ın DB'ye FK ihlaliyle (ya da
+// sessizce) girmesine yol açardı — bu yüzden enum burada, create ZORUNLU alır.
+const platformAdminAccountCreateSchema = z.object({
+  email:     z.string().email('Geçerli bir e-posta girin').max(200, 'E-posta 200 karakterden uzun olamaz'),
+  fullName:  z.string().min(2, 'Ad soyad en az 2 karakter olmalı').max(200),
+  groupSlug: z.enum(['super', 'destek', 'finans', 'icerik']),
+});
+
+// PATCH — tüm alanlar opsiyonel (kısmi güncelleme, platformSettingsUpdateSchema'nın
+// AYNI deseni); isActive create şemasında YOK (yeni hesap her zaman aktif oluşturulur).
+const platformAdminAccountUpdateSchema = platformAdminAccountCreateSchema.partial().extend({
+  isActive: z.boolean().optional(),
+});
+
+// ── KURUM TALEBİ (Destek/Faturalama/Satış Biletleri) ─────────
+// createSchema bu task'ın router'ında KULLANILMAZ — tasarım dokümanının kendi
+// kararı (hastane tarafının "destek talebi aç" akışı bu konsolun kapsamı
+// DIŞINDA, talepler şimdilik seed/manuel veriyle var olur, bkz.
+// docs/superpowers/specs/2026-11-28-platform-admin-konsolu-design.md). Brief'in
+// dosya listesi bu şemayı açıkça adlandırdığı için (gelecekteki bir hastane-tarafı
+// "talep aç" endpoint'i için), burada şekliyle birlikte tanımlanıyor.
+const supportTicketCreateSchema = z.object({
+  institutionId: z.string().uuid(),
+  type:          z.enum(['TECHNICAL', 'FEATURE_REQUEST', 'BILLING', 'SALES']),
+  priority:      z.enum(['LOW', 'MEDIUM', 'HIGH']).default('MEDIUM'),
+  subject:       z.string().min(3).max(200),
+  description:   z.string().max(2000).optional().nullable(),
+});
+
+// PATCH /:id/status — supportTicket.service.js'in updateStatus'u SADECE status alır.
+const supportTicketUpdateSchema = z.object({
+  status: z.enum(['OPEN', 'IN_PROGRESS', 'CLOSED']),
+});
+
+const supportTicketCommentSchema = z.object({
+  message: z.string().min(1, 'Yorum metni gerekli').max(2000),
+});
+
+// ── PLATFORM AYARLARI (tek satır, id=1) ─────────────────────
+// Tüm alanlar opsiyonel (PATCH kısmi güncelleme). Alan adları camelCase; servis
+// katmanı bunları platform_settings kolonlarına (snake_case) çevirir.
+const platformSettingsUpdateSchema = z.object({
+  platformName:    z.string().min(1).max(100),
+  supportEmail:    z.string().email().max(200).nullable(),
+  billingEmail:    z.string().email().max(200).nullable(),
+  trialDays:       z.number().int().positive().max(365),
+  autoBilling:     z.boolean(),
+  maintenanceMode: z.boolean(),
+  backupFrequency: z.string().min(1).max(20),
+}).partial();
 
 // ── BİLDİRİM ────────────────────────────────────────────────
 const notificationCreateSchema = z.object({
@@ -211,6 +305,7 @@ module.exports = {
   loginSchema,
   registerSchema,
   refreshSchema,
+  platformAdminLoginSchema,
   surgeryCreateSchema,
   surgeryUpdateSchema,
   patientCreateSchema,
@@ -220,6 +315,15 @@ module.exports = {
   roomCreateSchema,
   roomStatusSchema,
   institutionCreateSchema,
+  institutionUpdateSchema,
+  institutionStatusSchema,
+  institutionGroupCreateSchema,
+  platformAdminAccountCreateSchema,
+  platformAdminAccountUpdateSchema,
+  supportTicketCreateSchema,
+  supportTicketUpdateSchema,
+  supportTicketCommentSchema,
+  platformSettingsUpdateSchema,
   notificationCreateSchema,
   paginationSchema,
   deviceCreateSchema,

@@ -7,6 +7,12 @@ const rateLimit  = require('express-rate-limit');
 const { RATE_LIMIT, CSP, HEADERS } = require('./config/security');
 const { sanitizeMiddleware }        = require('./utils/sanitize');
 const authRoutes     = require('./routes/auth.routes');
+const platformAdminAuthRoutes = require('./routes/platformAdminAuth.routes');
+const institutionsRoutes = require('./routes/institutions.routes');
+const institutionGroupsRoutes = require('./routes/institutionGroups.routes');
+const platformAdminAccountsRoutes = require('./routes/platformAdminAccounts.routes');
+const supportTicketsRoutes = require('./routes/supportTickets.routes');
+const platformSettingsRoutes = require('./routes/platformSettings.routes');
 const surgeryRoutes  = require('./routes/surgery.routes');
 const securityRoutes = require('./routes/security.routes');
 const aiRoutes       = require('./routes/ai.routes');
@@ -135,6 +141,12 @@ app.get('/health', (req, res) => {
 
 // ── API ROUTE'LARI ───────────────────────────────────────────
 app.use('/api/auth',         authRoutes);
+app.use('/api/platform-admin/auth', platformAdminAuthRoutes);
+app.use('/api/platform-admin/institutions', institutionsRoutes);
+app.use('/api/platform-admin/institution-groups', institutionGroupsRoutes);
+app.use('/api/platform-admin/accounts', platformAdminAccountsRoutes);
+app.use('/api/platform-admin/support-tickets', supportTicketsRoutes);
+app.use('/api/platform-admin/platform-settings', platformSettingsRoutes);
 app.use('/api/surgeries',    surgeryRoutes);
 app.use('/api/patients',     patientRouter);
 app.use('/api/rooms',        roomRouter);

@@ -10,6 +10,8 @@ import { vi, beforeAll, afterAll, afterEach } from 'vitest';
 process.env.NODE_ENV          = 'test';
 process.env.JWT_ACCESS_SECRET  = 'test-access-secret-minimum-32-chars-long!!';
 process.env.JWT_REFRESH_SECRET = 'test-refresh-secret-minimum-32-chars-long!';
+process.env.PLATFORM_ADMIN_ACCESS_SECRET  = 'test-pa-access-secret-minimum-32-chars-long!!';
+process.env.PLATFORM_ADMIN_REFRESH_SECRET = 'test-pa-refresh-secret-minimum-32-chars-long!';
 process.env.DATABASE_URL       = 'postgresql://test:test@localhost/test_db';
 process.env.ANTHROPIC_API_KEY  = 'test-key';
 process.env.IYZICO_API_KEY     = 'test-iyzico';
@@ -18,6 +20,18 @@ process.env.STRIPE_SECRET_KEY  = 'sk_test_placeholder';
 
 // ── DB MOCK ───────────────────────────────────────────────────
 // Gerçek PostgreSQL bağlantısı yerine mock kullanır
+//
+// NOT (Review Focus — Finding 5 araştırması sırasında doğrulandı): bu `vi.mock`,
+// bir test dosyasının KENDİSİNİN DOĞRUDAN import ETMEDİĞİ, servis kodu içinden
+// dolaylı (`require('../utils/db')`) bir bağımlılığa ASLA ulaşmıyor — repo'daki
+// HİÇBİR test bunu bu şekilde kullanmıyor (`global.mockDBQuery`'nin tek çağrı
+// noktası `kioskService.recordTimeoutRead.test.js`'in KENDİ yorumunda bunu
+// açıkça belgeliyor). Bu yüzden `middleware/platformAdminAuth.js`'in yeni
+// gerçek-zamanlı hesap-durumu kontrolü (bkz. o middleware'in kendi yorumu) test
+// dosyalarında BURADAN DEĞİL, her entegrasyon testinin KENDİ `registry.register
+// ('platformAdminAccount', ...)` mock'undan besleniyor (institutionGroups/
+// institutions/platformAdminAccounts/platformSettings/supportTickets.routes.
+// test.js'in her birinde — bu kod tabanının ZATEN kurulu DI deseni).
 const mockQueryFn = vi.fn();
 const mockTransactionFn = vi.fn();
 
