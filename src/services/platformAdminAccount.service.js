@@ -156,20 +156,97 @@ async function createAccount({ data, actorId, req }) {
 }
 
 /**
+ * runGuardedUpdate — `updateAccount`'ın "son aktif süper yönetici" kilidini TEK bir
+ * `FOR UPDATE` statement'ıyla uygulayan yardımcı (ayrıntılı gerekçe: task-7-report.md'nin
+ * "Fix report" bölümü — reviewer'ın Critical + Important bulguları).
+ *
+ * TEK SORGU, İKİ AYRI SORGU DEĞİL (Important fix): önceki sürüm burada İKİ ARDIŞIK
+ * `FOR UPDATE` çalıştırıyordu — önce hedef satırı, SONRA (hedef süper ise) aktif-süper
+ * kümesini. Bu, klasik bir AB-BA deadlock'u açıyordu: İstek A (süper-1'i pasife alıyor)
+ * önce süper-1'i kilitler (çatışmasız), SONRA aktif-süper kümesini (süper-2 dahil, B
+ * tarafından kilitli) kilitlemeye çalışıp BLOKE olur; eşzamanlı İstek B (süper-2'yi pasife
+ * alıyor) önce süper-2'yi kilitler (çatışmasız), SONRA aktif-süper kümesini (süper-1 dahil,
+ * A tarafından kilitli) kilitlemeye çalışıp BLOKE olur → A, B'yi beklerken B de A'yı
+ * bekler → Postgres'in deadlock detector'ü ~1sn sonra taraflardan birini 500 ile iptal
+ * eder. Bu sürüm hedef satırı VE (varsa) tüm aktif-süper satırlarını AYNI `SELECT ...
+ * FOR UPDATE` ifadesiyle (tek "kilitleme episode'u") alır — iki ayrı kilitleme adımı
+ * olmadığı için A'nın B'yi, B'nin de A'yı beklediği bir döngü YAPISAL OLARAK oluşamaz:
+ * kim önce başlarsa gereken TÜM kilitleri bir kerede alır, diğeri bu episode bitene
+ * (COMMIT/ROLLBACK) kadar bütünüyle bekler. `ORDER BY id`, Postgres'in olası birden
+ * fazla tarama planı arasında TUTARLI bir sıra tercih etmesi için ek bir ipucu — ama asıl
+ * garanti "iki ayrı adım yok, tek episode var" yapısından gelir. Ekstra güvenlik ağı
+ * olarak `40P01` (deadlock_detected) hatası BİR KEZ retry edilir (bu da reviewer'ın kabul
+ * ettiği tamamlayıcı/alternatif önlem) — teorik olarak tetiklenmemeli, ama planlayıcının
+ * nadir bir durumda farklı bir tarama sırası seçmesi ihtimaline karşı.
+ *
+ * TEK SORGUNUN WHERE'i hedefi VE tüm aktif süperleri (hedefin GERÇEKTEN süper olup
+ * olmadığına bakmadan) kilitler — hedef süper DEĞİLSE bu, o işlem süresince AKTİF
+ * SÜPERLERİ gereksiz yere (ama kısaca — tek bir UPDATE'lik süre) kilitlemiş olur. Bu
+ * BİLİNÇLİ bir ödünleşim: dinamik SQL ile "sadece gerekirse aktif-süper kümesini de
+ * kilitle" yazmak iki farklı sorgu şekli (ve dolayısıyla potansiyel olarak iki farklı
+ * tarama planı) anlamına gelirdi — ki bu da tam olarak giderilmek istenen deadlock
+ * riskinin kaynağıydı. Platform-admin hesap yönetimi yüksek frekanslı bir yol değil
+ * (nadir, insan-tetikli idari işlemler), bu yüzden kısa süreli ekstra kilit çekişmesi
+ * kabul edilebilir.
+ */
+async function runGuardedUpdate({ id, updateSql, params }, attempt = 0) {
+  try {
+    return await db.transaction(async (client) => {
+      const { rows: lockedRows } = await client.query(
+        `SELECT * FROM platform_admins
+         WHERE id=$1 OR (group_slug='super' AND is_active=TRUE)
+         ORDER BY id
+         FOR UPDATE`,
+        [id]
+      );
+      const target = lockedRows.find((r) => r.id === id);
+      if (!target) return { old: null, account: null };
+
+      if (target.group_slug === 'super' && target.is_active === true) {
+        const activeSuperCount = lockedRows.filter(
+          (r) => r.group_slug === 'super' && r.is_active === true
+        ).length;
+        if (activeSuperCount <= 1) {
+          throw Object.assign(
+            new Error('Son aktif süper yönetici pasife alınamaz veya süper grubundan çıkarılamaz'),
+            { statusCode: 409 }
+          );
+        }
+      }
+
+      const { rows } = await client.query(updateSql, params);
+      return { old: target, account: rows[0] };
+    });
+  } catch (err) {
+    if (err.code === '40P01' && attempt === 0) {
+      return runGuardedUpdate({ id, updateSql, params }, attempt + 1);
+    }
+    throw err;
+  }
+}
+
+/**
  * updateAccount — kısmi güncelleme (email/fullName/groupSlug/isActive).
  *
  * SON AKTİF SÜPER YÖNETİCİ KİLİDİ (Review Focus — task-7-brief.md'nin "safety-critical
- * requirement"i): `data.isActive===false` istendiğinde, güncelleme AYNI transaction
- * içinde şu sırayla yapılır:
- *   1. Hedef satır `SELECT ... FOR UPDATE` ile KİLİTLENİR — group_slug/is_active'i
- *      transaction BAŞLAMADAN ÖNCE (bayat olabilecek) okunmuş bir değer değil, kilitli/
- *      güncel haliyle görürüz (bu, aynı satırı aynı anda değiştirmeye çalışan başka bir
- *      isteği de bloke eder).
- *   2. Hedef `group_slug==='super'` VE şu an `is_active===true` ise: TÜM aktif süper
- *      yönetici satırları `SELECT ... FOR UPDATE` ile KİLİTLENİR (hedef de bu kümenin
- *      içinde, çünkü hâlâ aktif). Bu küme <=1 ise (yani hedef TEK aktif süper ise) 409
- *      fırlatılır — UPDATE'e HİÇ gidilmez.
- *   3. Guard geçerse, UPDATE AYNI transaction/client ile çalışır.
+ * requirement"i + task-7-report.md'nin "Fix report" bölümündeki reviewer Critical
+ * bulgusu): guard'ı tetikleyen İKİ AYRI durum var, ikisi de AYNI `runGuardedUpdate`
+ * yolundan geçer:
+ *   1. `data.isActive===false` (açık deaktivasyon).
+ *   2. `data.groupSlug` gönderilmiş VE `'super'` DEĞİL (süper grubundan BAŞKA bir gruba
+ *      taşıma) — `isActive`'e hiç dokunulmasa bile bu, hedefin aktif-süper kümesinden
+ *      ÇIKMASI anlamına gelir. İlk sürüm BUNU kapsamıyordu: `{ groupSlug: 'destek' }`
+ *      ile tek aktif süperi `is_active=true` kalacak şekilde başka bir gruba taşımak
+ *      guard'ı hiç tetiklemiyordu — sonuç aynı felaket (0 aktif süper) ama konsolun TÜM
+ *      rotaları `authorizePlatformAdmin('super')` olduğu için API ÜZERİNDEN TELAFİSİ
+ *      YOK (artık hiçbir token bu rotalara erişip yeni bir süper oluşturamaz/terfi
+ *      ettiremez). Reviewer'ın kararı: bu, brief'in iki örnek-tetikleyicisinin
+ *      (`isActive:false`, "silinmeye çalışılırsa") LAFZINDA olmasa da, görevin asıl
+ *      amacının ("platform asla son aktif süperini kaybetmemeli") AÇIKÇA kapsamına
+ *      giriyor — brief-literal bir sınır olarak savunulamaz.
+ *
+ * Guard'ın KENDİSİ (hedefi + aktif-süper kümesini TEK `FOR UPDATE` ile kilitleme,
+ * deadlock-retry dahil) `runGuardedUpdate`'te — bkz. onun gerekçe yorumu (Important fix).
  *
  * NEDEN "SELECT COUNT + sonra UPDATE" (iki ayrı statement, kilit YOK) YETERSİZ: Postgres'in
  * varsayılan READ COMMITTED izolasyonunda her statement kendi (o anki) commit edilmiş
@@ -180,10 +257,7 @@ async function createAccount({ data, actorId, req }) {
  * edilmemiş değişikliğini GÖREMEZ); ikisi de kendi UPDATE'ini çalıştırıp COMMIT eder →
  * sonuç 0 aktif süper. `db.transaction` içine sarmak TEK BAŞINA bunu çözmez — izolasyon
  * seviyesini değiştirmediği ya da satırları KİLİTLEMEDİĞİ sürece aynı iki-snapshot açığı
- * kalır. Bu yüzden burada SADECE transaction'a sarmakla YETİNİLMEDİ: `FOR UPDATE`, ikinci
- * isteğin sayım SELECT'ini birincisi COMMIT/ROLLBACK olana kadar fiilen BLOKE eder; birinci
- * COMMIT olduktan sonra ikincisinin kilidi açılır ve artık GÜNCEL (azalmış) sayıyı görür —
- * bu da gerçek sırayla (race değil) doğru kararı garantiler.
+ * kalır.
  *
  * Task 4'ün `removeInstitution`'ındaki "WHERE id=$1 AND group_id=$2" deseni burada
  * KULLANILAMADI: o desende kontrol VE güncelleme AYNI satırın AYNI kolonuna bakıyordu (tek
@@ -212,34 +286,16 @@ async function updateAccount({ id, data, actorId, req }) {
   params.push(id);
   const updateSql = `UPDATE platform_admins SET ${sets.join(', ')} WHERE id=$${pi} RETURNING *`;
 
-  const willDeactivate = data.isActive === false;
+  // Guard tetikleyicileri (yukarıdaki fonksiyon yorumundaki 2 durum).
+  const mayLeaveActiveSuperGroup =
+    data.isActive === false ||
+    (data.groupSlug !== undefined && data.groupSlug !== 'super');
 
   let old;
   let account;
   try {
-    if (willDeactivate) {
-      const result = await db.transaction(async (client) => {
-        const { rows: targetRows } = await client.query(
-          'SELECT * FROM platform_admins WHERE id=$1 FOR UPDATE', [id]
-        );
-        const target = targetRows[0];
-        if (!target) return { old: null, account: null };
-
-        if (target.group_slug === 'super' && target.is_active === true) {
-          const { rows: lockedActiveSupers } = await client.query(
-            `SELECT id FROM platform_admins WHERE group_slug='super' AND is_active=TRUE FOR UPDATE`
-          );
-          if (lockedActiveSupers.length <= 1) {
-            throw Object.assign(
-              new Error('Son aktif süper yönetici pasife alınamaz'),
-              { statusCode: 409 }
-            );
-          }
-        }
-
-        const { rows } = await client.query(updateSql, params);
-        return { old: target, account: rows[0] };
-      });
+    if (mayLeaveActiveSuperGroup) {
+      const result = await runGuardedUpdate({ id, updateSql, params });
       old = result.old;
       account = result.account;
     } else {

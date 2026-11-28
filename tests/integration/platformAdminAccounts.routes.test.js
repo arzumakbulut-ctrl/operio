@@ -194,6 +194,18 @@ describe('Platform-Admin Hesap Yönetimi', () => {
         .send({ isActive: false });
       expect(res.status).toBe(409);
     });
+
+    it('tek aktif süper yönetici groupSlug ile BAŞKA bir gruba taşınmaya çalışılırsa (isActive gönderilmese de) servis 409 fırlatır, route bunu yansıtır (Review Focus — Critical fix)', async () => {
+      mockService.updateAccount.mockRejectedValueOnce(
+        Object.assign(new Error('Son aktif süper yönetici pasife alınamaz veya süper grubundan çıkarılamaz'), { statusCode: 409 })
+      );
+      const res = await request.patch(`/api/platform-admin/accounts/${lastSuperId}`)
+        .set('Authorization', `Bearer ${superToken}`)
+        .send({ groupSlug: 'destek' });
+      expect(res.status).toBe(409);
+      const callArg = mockService.updateAccount.mock.calls[0][0];
+      expect(callArg.data).toEqual({ groupSlug: 'destek' });
+    });
   });
 
   describe('Cross-boundary (Review Focus)', () => {
