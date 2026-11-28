@@ -28,9 +28,18 @@ export default function Kurum() {
     // satırlar düz (nested .user yok) snake_case DB kolonları: action, resource,
     // resource_id, created_at, full_name (LEFT JOIN users).
     fetch('http://localhost:4000/api/audit', { headers: { Authorization: 'Bearer ' + token } })
-      .then(r => r.json().catch(() => null))
-      .then(json => {
-        if (!json?.success) { showToast(json?.error?.message || 'Aktivite günlüğü yüklenemedi'); return; }
+      .then(r => r.json().catch(() => null).then(json => ({ status: r.status, json })))
+      .then(({ status, json }) => {
+        if (!json?.success) {
+          // Final review Finding 5: GET /api/audit sadece Üst Yönetici'ye
+          // (authorize(0)) açık — diğer roller için backend 403/FORBIDDEN
+          // döner. Bu gerçek bir hata değil, rol bazlı bir görünürlük kısıtı;
+          // bu durumda sessizce boş liste göster, toast GÖSTERME (diğer tüm
+          // hata türlerinde toast göstermeye devam et).
+          if (status === 403 || json?.error?.code === 'FORBIDDEN') { setLogs([]); return; }
+          showToast(json?.error?.message || 'Aktivite günlüğü yüklenemedi');
+          return;
+        }
         setLogs(Array.isArray(json.data) ? json.data : []);
       })
       .catch(() => showToast('Aktivite günlüğü yüklenemedi'));
