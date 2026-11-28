@@ -2,15 +2,11 @@ import { useState, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useDataStore, useUIStore, useAuthStore } from '../store';
 import { ROLES } from '../data/roles';
-import { updateSurgeryStatus, assignTeamMember, removeTeamMember } from '../services/surgeriesAdapter';
+import { updateSurgeryStatus, assignTeamMember, removeTeamMember, STATUS_TO_BACKEND } from '../services/surgeriesAdapter';
 
-// UI'ın Türkçe durum string'i → backend enum'u (Task 1'deki STATUS_TO_TR'nin
-// tersi). 'Iptal' dropdown'da seçilebilir bir seçenek olduğu için brief'teki
-// 3 anahtarlı tabloya eklendi — eksik bırakılsaydı "Iptal" seçildiğinde
-// backend'e status=undefined gönderilip güncelleme sessizce hiçbir şey
-// yapmazdı.
-const STATUS_TO_BACKEND = { 'Bekliyor':'WAITING', 'Devam Ediyor':'IN_PROGRESS', 'Tamamlandi':'COMPLETED', 'Iptal':'CANCELLED' };
-
+// Final review Finding 1: STATUS_TO_BACKEND artık surgeriesAdapter.js'den
+// import ediliyor (önceden burada ayrı bir yerel kopyası vardı —
+// OnayBekleyenler.jsx'in kendi kopyasıyla tutarsız kalma riski taşıyordu).
 
 const ATANABILIR_HEMSIRE  = ['scrub','sirkule','yardimci'];
 const EKIP_COLORS_AD = { cerrah:'#DC2626', asistan:'#EA580C', scrub:'#0284C7', scrub2:'#0284C7', sirkule:'#7C3AED', anestezi:'#14B8A6', anesteknik:'#059669', yardimci:'#D97706' };

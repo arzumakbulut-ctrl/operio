@@ -8,11 +8,32 @@ const BASE = 'http://localhost:4000/api';
 
 const STATUS_TO_TR = {
   WAITING:     'Bekliyor',
-  PREPARING:   'Bekliyor',
+  // Final review Finding 1: önceden CANCELLED/PREPARING de 'Bekliyor'a
+  // düşüyordu — yazma tarafında (AmeliyatDetay.jsx/OnayBekleyenler.jsx)
+  // 'Iptal' yazılan bir ameliyat, okuma tarafında aynı 'Bekliyor' etiketine
+  // geri döndüğü için her reload'da iptal/onay durumu kayboluyordu. 'Iptal'
+  // ve 'Hazırlanıyor' zaten bu kod tabanında var olan UI etiketleri
+  // (AmeliyatDetay.jsx'in durum dropdown'u, EkipPlani.jsx/Ameliyatlar.jsx/
+  // Dashboard.jsx'in ST_LBL['dot-prep']) — yeni bir etiket İCAT EDİLMEDİ.
+  PREPARING:   'Hazırlanıyor',
   IN_PROGRESS: 'Devam Ediyor',
   COMPLETED:   'Tamamlandi',
-  CANCELLED:   'Bekliyor',
+  CANCELLED:   'Iptal',
+  // POSTPONED'un ayrı bir UI karşılığı yok — kasıtlı olarak 'Bekliyor'da
+  // bırakıldı (bu fix wave'in kapsamı dışında, Finding 1'in notu).
   POSTPONED:   'Bekliyor',
+};
+
+// UI'ın Türkçe durum string'i → backend enum'u (STATUS_TO_TR'nin yazma
+// yönünde kullanılan tersi). Daha önce AmeliyatDetay.jsx ve
+// OnayBekleyenler.jsx bu tabloyu AYRI AYRI kendi dosyalarında tutuyordu —
+// biri güncellenip diğeri unutulursa aynı "yazılan durum okunamıyor" hatası
+// tekrar oluşurdu. Artık TEK paylaşılan kaynak burada.
+export const STATUS_TO_BACKEND = {
+  'Bekliyor':      'WAITING',
+  'Devam Ediyor':  'IN_PROGRESS',
+  'Tamamlandi':    'COMPLETED',
+  'Iptal':         'CANCELLED',
 };
 
 const STATUS_TO_DOT = {
@@ -91,7 +112,12 @@ async function apiCall(method, path, body) {
 }
 
 export async function listSurgeries() {
-  const result = await apiCall('GET', '/surgeries');
+  // Finding 3: query param yoksa backend paginationSchema limit'i varsayılan
+  // 20'ye düşürüyor (schemas.js:204-208) — 20'den fazla ameliyatı olan bir
+  // kurumda liste sessizce kırpılırdı. ?limit=100 şemanın izin verdiği
+  // maksimum (tam pagination kapsam dışı, final reviewer'ın onayladığı
+  // minimum düzeltme).
+  const result = await apiCall('GET', '/surgeries?limit=100');
   if (!Array.isArray(result?.data)) return [];
   return result.data.map(mapSurgery);
 }

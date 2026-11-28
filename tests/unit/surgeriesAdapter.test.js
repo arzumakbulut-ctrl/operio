@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { listSurgeries, createSurgery, updateSurgeryStatus, assignTeamMember, removeTeamMember } from '../../src/services/surgeriesAdapter.js';
+import { listSurgeries, createSurgery, updateSurgeryStatus, assignTeamMember, removeTeamMember, STATUS_TO_BACKEND } from '../../src/services/surgeriesAdapter.js';
 
 const BASE = 'http://localhost:4000/api';
 
@@ -27,7 +27,9 @@ describe('listSurgeries', () => {
 
     const result = await listSurgeries();
 
-    expect(global.fetch).toHaveBeenCalledWith(`${BASE}/surgeries`, expect.objectContaining({
+    // Finding 3: query param yoksa backend limit'i varsayılan 20'ye düşürüyor
+    // — ?limit=100 şemanın izin verdiği maksimum gönderilmeli.
+    expect(global.fetch).toHaveBeenCalledWith(`${BASE}/surgeries?limit=100`, expect.objectContaining({
       headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
     }));
     expect(result).toHaveLength(1);
@@ -37,7 +39,12 @@ describe('listSurgeries', () => {
     });
   });
 
-  it('CANCELLED ve POSTPONED durumları "Bekliyor" filtresine düşer (Review Focus)', async () => {
+  // Final review Finding 1: önceden CANCELLED/POSTPONED İKİSİ de 'Bekliyor'a
+  // düşüyordu — bu, yazma tarafında 'Iptal' yazılan bir ameliyatın her
+  // reload'da "Bekliyor"a geri dönmesine (silently) yol açan kök nedendi.
+  // CANCELLED artık kendi ayırt edilebilir TR etiketine ('Iptal') okunuyor;
+  // POSTPONED kasıtlı olarak 'Bekliyor'da bırakıldı (ayrı bir UI kavramı yok).
+  it('CANCELLED artık "Iptal"e okunuyor, POSTPONED kasıtlı olarak "Bekliyor"da kalıyor (Finding 1)', async () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
       json: async () => ({ success: true, data: [
@@ -46,8 +53,19 @@ describe('listSurgeries', () => {
       ], meta:{} }),
     });
     const result = await listSurgeries();
-    expect(result[0].durum).toBe('Bekliyor');
+    expect(result[0].durum).toBe('Iptal');
     expect(result[1].durum).toBe('Bekliyor');
+  });
+
+  it('PREPARING artık "Hazırlanıyor"a okunuyor (Finding 1 — mevcut dot-prep/ST_LBL etiketiyle tutarlı)', async () => {
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ success: true, data: [
+        { id:'s4', title:'Z', status:'PREPARING', scheduled_start:'2026-11-28T08:00:00.000Z' },
+      ], meta:{} }),
+    });
+    const result = await listSurgeries();
+    expect(result[0].durum).toBe('Hazırlanıyor');
   });
 
   it('backend {success:false} dönerse boş dizi döner, FIRLATMAZ', async () => {
@@ -92,5 +110,20 @@ describe('assignTeamMember / removeTeamMember', () => {
     global.fetch.mockResolvedValueOnce({ ok:true, json: async () => ({ success:true, data:{} }) });
     await removeTeamMember('s1', 'u1');
     expect(global.fetch).toHaveBeenCalledWith(`${BASE}/surgeries/s1/team/u1`, expect.objectContaining({ method: 'DELETE' }));
+  });
+});
+
+// Final review Finding 1: STATUS_TO_BACKEND artık TEK paylaşılan kaynak —
+// AmeliyatDetay.jsx ve OnayBekleyenler.jsx bunu import eder, kendi yerel
+// kopyalarını tutmaz. 'Iptal':'CANCELLED' girdisi Task 3'ün kendi fix'iydi
+// ve burada da korunmalı.
+describe('STATUS_TO_BACKEND (paylaşılan ters eşleme tablosu)', () => {
+  it('AmeliyatDetay.jsx\'in durum dropdown\'undaki 4 değeri doğru backend enum\'una çevirir', () => {
+    expect(STATUS_TO_BACKEND).toEqual({
+      'Bekliyor':     'WAITING',
+      'Devam Ediyor': 'IN_PROGRESS',
+      'Tamamlandi':   'COMPLETED',
+      'Iptal':        'CANCELLED',
+    });
   });
 });

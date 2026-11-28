@@ -1,15 +1,25 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore, useUIStore } from '../store';
 import { ROLES } from '../data/roles';
-import { listSurgeries, updateSurgeryStatus } from '../services/surgeriesAdapter.js';
+import { listSurgeries, updateSurgeryStatus, STATUS_TO_BACKEND } from '../services/surgeriesAdapter.js';
 
 // Bu sayfanın kendi talep-triyaj sözlüğü ('Onaylandi'/'Reddedildi') backend'in
 // gerçek ameliyat-durumu enum'u DEĞİL (WAITING|PREPARING|IN_PROGRESS|COMPLETED|
-// CANCELLED|POSTPONED). AmeliyatDetay.jsx:12'deki STATUS_TO_BACKEND tablosuyla
-// tutarlı olacak şekilde: onay = ameliyat resmi olarak sıraya girer → WAITING
-// (tablodaki 'Bekliyor':'WAITING' emsaliyle aynı); red = 'Iptal':'CANCELLED'
-// emsaliyle aynı mantık — talep reddedildiğinde ameliyat iptal edilmiş sayılır.
-const TALEP_DURUM_TO_BACKEND = { Onaylandi: 'WAITING', Reddedildi: 'CANCELLED' };
+// CANCELLED|POSTPONED).
+//
+// Final review Finding 1: önceden Onaylandi→WAITING yazılıyordu. Ama WAITING,
+// henüz hiç dokunulmamış/onaylanmamış bir ameliyatın da varsayılan durumu —
+// reload sonrası dbToTalep ikisini ayırt edemiyor, onaylanmış bir talep her
+// reload'da yeniden "Bekleyenler" sekmesine düşüyordu (bu dosyanın kendi
+// "onaylandi" tab'ı SADECE backend durumuna bakıyor, ayırt edici başka bir
+// alan yok — aşağıdaki dbToTalep'e bakınız). Onaylandi artık PREPARING
+// yazıyor: STATUS_TO_TR'de 'Hazırlanıyor' TR etiketine okunuyor, hem
+// WAITING'den ayırt edilebilir hem de "onay sonrası hazırlık aşaması"
+// olarak anlamlı bir karşılık.
+// Reddedildi→CANCELLED değişmedi (STATUS_TO_BACKEND['Iptal'] ile AYNI değer —
+// AmeliyatDetay.jsx'teki 'Iptal' seçeneğiyle tutarlı, Task 3'ün kendi fix'i);
+// burada STATUS_TO_BACKEND'den okunarak tek kaynaktan türetiliyor.
+const TALEP_DURUM_TO_BACKEND = { Onaylandi: 'PREPARING', Reddedildi: STATUS_TO_BACKEND['Iptal'] };
 
 // NOT: s.hasta/s.dr/s.tarihRaw/s.saat/s.bitis/s.salon/s.op/s.durum/s.hastaDetay
 // surgeriesAdapter.listSurgeries()'in Türkçe-eşlenmiş alan adlarıdır (bkz. Task 2).
@@ -26,10 +36,18 @@ function dbToTalep(s) {
   const tarihStr = tarihDt ? tarihDt.toLocaleDateString('tr-TR') : '—';
   const olusturanStr = s.createdAt ? new Date(s.createdAt).toLocaleString('tr-TR') : tarihStr;
   const statusVal = s.durum || s.status;
+  // Final review Finding 1: 'Iptal' (CANCELLED'ın yeni okunan TR etiketi) ve
+  // 'Hazırlanıyor' (PREPARING'in TR etiketi) case'leri eklendi — aksi halde
+  // reddedilen/onaylanan bir talep reload sonrası tanınmayıp varsayılan
+  // 'beklemede'ye düşerdi. 'Onaylandi'/'Reddedildi' dead-case'leri (eski
+  // backend'in döndürdüğü, artık hiçbir zaman üretilmeyen TR string'leri)
+  // geriye dönük uyumluluk için zararsızca bırakıldı.
   const durum = statusVal === 'Bekliyor'    ? 'beklemede'
+    : statusVal === 'Iptal'                 ? 'reddedildi'
     : statusVal === 'Onaylandi'             ? 'onaylandi'
     : statusVal === 'Devam Ediyor'          ? 'onaylandi'
     : statusVal === 'Tamamlandi'            ? 'onaylandi'
+    : statusVal === 'Hazırlanıyor'          ? 'onaylandi'
     : statusVal === 'Reddedildi'            ? 'reddedildi'
     : 'beklemede';
   const saatVal  = s.saat || s.startTime || '—';
