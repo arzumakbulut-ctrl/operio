@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuthStore, useUIStore } from '../store';
 import Modal from '../components/ui/Modal';
 import { listSurgeries } from '../services/surgeriesAdapter';
+import { DB_TO_UI, UI_TO_DB } from '../services/roomStatusMap.js';
 
 const BASE = 'http://localhost:4000/api';
 
@@ -13,14 +14,9 @@ const SALON_CFG = {
   closed:      { cls:'st-closed',      dot:'#DC2626', txt:'Kapalı',      shadow:''                                  },
 };
 
-// DB status (backend #1 roomStatusSchema enum) → UI key
-// NOT: Dosyada eskiden Türkçe DB değerleri ('Bos','Aktif',...) varsaydı; gerçek
-// backend roomStatusSchema'sı 'ACTIVE'|'IDLE'|'RESERVED'|'MAINTENANCE'|'CLOSED'
-// enum'unu kullanıyor (bkz. schemas.js) — bu yüzden her iki eşleme tablosu da
-// gerçek enum değerlerine güncellendi (Task 6).
-const DB_TO_UI = { 'IDLE':'idle', 'ACTIVE':'active', 'RESERVED':'reserved', 'MAINTENANCE':'maintenance', 'CLOSED':'closed' };
-// UI key → DB status enum
-const UI_TO_DB = { idle:'IDLE', active:'ACTIVE', reserved:'RESERVED', maintenance:'MAINTENANCE', closed:'CLOSED' };
+// DB status (backend #1 roomStatusSchema enum) → UI key / UI key → DB status
+// enum: final review Finding 2 ile src/services/roomStatusMap.js'e taşındı
+// (App.jsx'in global useApiLoader'ı da AYNI tabloyu kullanıyor).
 
 function roomNumSort(name) {
   const m = name.match(/\d+/);
