@@ -837,3 +837,59 @@ Expected: PASS (bilinen 1-2 flaky test hariç — App.kioskRoute, SetTakip.visio
 git add src/pages/OnayBekleyenler.jsx src/pages/EkipPlani.jsx tests/components/OnayBekleyenlerEkipPlaniMutations.test.jsx
 git commit -m "fix(surgeries): migrate OnayBekleyenler/EkipPlani mutations (plan gap found during Task 3)"
 ```
+
+---
+
+### Task 11: Raporlar.jsx Aktivite Logu Çağrısı (Task 9 sırasında bulunan plan boşluğu)
+
+**Neden bu task var:** Task 9 sırasında implementer kendi raporunda bildirdi — `src/pages/Raporlar.jsx:50`'nin kendi bağımsız `GET /api/logs?limit=5` çağrısı var, Kurum.jsx/AktiviteLoglari.jsx'in Task 9'da taşındığı AYNI ölü uç noktaya. Orijinal denetimde Kaynak 6 (Aktivite Logları) sadece Kurum.jsx + AktiviteLoglari.jsx olarak listelenmişti — Raporlar.jsx gözden kaçmıştı. Backend #1'de gerçek karşılığı (`GET /api/audit`) zaten var, Task 9'da tam olarak bu remap kurulmuştu.
+
+**Files:**
+- Modify: `src/pages/Raporlar.jsx` (aktivite logu fetch + alan eşlemesi)
+- Test: `tests/components/RaporlarAuditLog.test.jsx` (yeni)
+
+**Interfaces:**
+- Consumes: hiçbiri (bağımsız `fetch`, adapter'a gerek yok — Task 9'daki Kurum.jsx/AktiviteLoglari.jsx ile aynı YAGNI kararı).
+
+- [ ] **Step 1: Write the failing test**
+
+`tests/components/RaporlarAuditLog.test.jsx`:
+
+```jsx
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+
+describe('Raporlar.jsx artık /api/audit kullanıyor (Task 9 plan boşluğu)', () => {
+  it('Raporlar.jsx artık /logs DEĞİL /api/audit kullanıyor', () => {
+    const src = readFileSync('src/pages/Raporlar.jsx', 'utf8');
+    expect(src).not.toMatch(/['"`]\/logs/);
+    expect(src).toMatch(/\/api\/audit/);
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `npm test -- tests/components/RaporlarAuditLog.test.jsx`
+Expected: FAIL
+
+- [ ] **Step 3: Dosyayı güncelle**
+
+Task 9'daki Kurum.jsx/AktiviteLoglari.jsx ile TUTARLI aynı remap: `GET /api/logs?limit=5` → `GET /api/audit?limit=5`; `{items:[]}` zarfı → `{success,data:[],meta}` (yanıttan `data` okunur); alan eşlemesi `action`→`action`, `entity`→`resource`, `entityId`→`resource_id`, `createdAt`→`created_at`, `user.name`→`full_name` (düz alan, iç içe `user` nesnesi yok) — Task 9'da zaten kurulan gerçek `audit_logs` satır şekliyle birebir aynı.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `npm test -- tests/components/RaporlarAuditLog.test.jsx`
+Expected: PASS
+
+- [ ] **Step 5: Run full frontend test suite (regresyon)**
+
+Run: `npm test`
+Expected: PASS (bilinen 1-2 flaky test hariç — App.kioskRoute, SetTakip.visionCount)
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/pages/Raporlar.jsx tests/components/RaporlarAuditLog.test.jsx
+git commit -m "fix(reports): migrate Raporlar.jsx activity log call to /api/audit (plan gap found during Task 9)"
+```
