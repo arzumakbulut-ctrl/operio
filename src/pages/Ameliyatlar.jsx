@@ -275,7 +275,18 @@ export default function Ameliyatlar() {
         notes: ekleForm.notlar,
       });
       if (!yeni) throw new Error('Kayit hatasi');
-      addSurgery(yeni);
+      // Minor Finding B (final review): bare POST .../surgeries yanıtı
+      // (RETURNING *, join yok) hasta/salon adını İÇERMEZ — mapSurgery bu
+      // yüzden hasta/salon'u boş string döner, yeni satır reload'a kadar
+      // boş görünürdü. Formda zaten elimizde olan hasta/salon bilgisiyle
+      // dolduruyoruz (adapter'a dokunulmadı, sadece bu fonksiyona lokal
+      // bir yama).
+      const salonAdi = (rooms || []).find(r => r.id === ekleForm.salon);
+      addSurgery({
+        ...yeni,
+        hasta: yeni.hasta || `${hasta.ad || ''} ${hasta.soyad || ''}`.trim(),
+        salon: yeni.salon || (salonAdi ? (salonAdi.ad || salonAdi.name || '') : ''),
+      });
       showToast('Ameliyat eklendi');
       setEkleModal(false);
       setEkleForm({tip:'',hastaAd:'',tarih:today,saat:'08:00',bitis:'10:00',salon:'',notlar:''});
