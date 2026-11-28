@@ -64,9 +64,24 @@ export default function SalonYonetim() {
   const canManage = curRole === 0 || curRole === 1;
 
   // DB'den yükle
+  // NOT (Task 6 — sonradan eklenen düzeltme): Bu satır gerçek backend #1'in
+  // {success,data} zarfını hiç soymuyordu — r.json() çıplak bir dizi değil
+  // {success,data:[...]} objesi döndürüyor, bu yüzden rooms.map(...) aşağıda
+  // çöküyordu (yalnızca mevcut .catch(()=>{}) sayesinde sayfa çökmüyor, salon
+  // listesi sessizce boş kalıyordu — kullanıcının "salonlarım görünmüyor"
+  // şikayetinin kök nedeni buydu). Create/status-update için zaten kurulan
+  // aynı {success,data}/{success,error} ayrıştırma + hata-toast deseni
+  // burada da uygulandı.
   useEffect(() => {
     Promise.all([
-      fetch(`${BASE}/rooms`, { headers: h }).then(r => r.ok ? r.json() : []),
+      fetch(`${BASE}/rooms`, { headers: h }).then(async (r) => {
+        const json = await r.json().catch(() => null);
+        if (!r.ok || !json?.success) {
+          showToast(json?.error?.message || 'Salonlar yüklenemedi');
+          return [];
+        }
+        return Array.isArray(json.data) ? json.data : [];
+      }).catch(() => { showToast('Salonlar yüklenemedi'); return []; }),
       listSurgeries(),
     ]).then(([rooms, ameliyatlar]) => {
       const mapped = rooms

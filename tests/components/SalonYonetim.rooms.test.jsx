@@ -69,7 +69,7 @@ describe('SalonYonetim — gerçek backend #1 uç noktaları', () => {
         test: (url, method) => method === 'GET' && /\/rooms$/.test(url),
         respond: () => Promise.resolve({
           ok: true,
-          json: async () => ([{ id: 'room-1', name: 'Salon 1', status: 'IDLE', capacity: 6 }]),
+          json: async () => ({ success: true, data: [{ id: 'room-1', name: 'Salon 1', status: 'IDLE', capacity: 6 }] }),
         }),
       },
       {
@@ -125,6 +125,64 @@ describe('SalonYonetim — gerçek backend #1 uç noktaları', () => {
     });
 
     // Sayfa hâlâ render edilmiş durumda olmalı (çökmedi).
+    expect(screen.getByRole('button', { name: /salon ekle/i })).toBeInTheDocument();
+  });
+
+  // Task 6 — sonradan eklenen düzeltme: ilk salon-listesi fetch'i de gerçek
+  // backend #1'in {success,data} zarfını artık soyuyor. Önceden bu çağrı
+  // r.json()'ı doğrudan diziymiş gibi .map() ediyordu — gerçek backend'e karşı
+  // {success,data:[...]} objesi döndüğü için rooms.map fırlıyor, mevcut
+  // .catch(()=>{}) bunu yutup salon listesini sessizce boş bırakıyordu
+  // (kullanıcının "salonlarım görünmüyor" şikayetinin kök nedeni).
+  it('gerçek backend #1 zarfıyla ({success,data}) GET /api/rooms yanıtı salon listesini doğru render eder', async () => {
+    global.fetch = flexibleFetchMock([
+      {
+        test: (url, method) => method === 'GET' && /\/rooms$/.test(url),
+        respond: () => Promise.resolve({
+          ok: true,
+          json: async () => ({
+            success: true,
+            data: [
+              { id: 'room-1', name: 'Salon 1', status: 'IDLE', capacity: 6 },
+              { id: 'room-2', name: 'Salon 2', status: 'ACTIVE', capacity: 8 },
+            ],
+          }),
+        }),
+      },
+      {
+        test: (url, method) => method === 'GET' && /\/surgeries/.test(url),
+        respond: () => Promise.resolve({ ok: true, json: async () => ({ success: true, data: [] }) }),
+      },
+    ]);
+
+    render(<SalonYonetim />);
+
+    expect(await screen.findByText('Salon 1')).toBeInTheDocument();
+    expect(screen.getByText('Salon 2')).toBeInTheDocument();
+  });
+
+  it('GET /api/rooms backend hatasıyla (success:false) dönerse sayfa çökmez, salon listesi boş kalır ve hata toast\'ı gösterilir', async () => {
+    global.fetch = flexibleFetchMock([
+      {
+        test: (url, method) => method === 'GET' && /\/rooms$/.test(url),
+        respond: () => Promise.resolve({
+          ok: false,
+          status: 500,
+          json: async () => ({ success: false, error: { code: 'INTERNAL_SERVER_ERROR', message: 'Salonlar alınamadı' } }),
+        }),
+      },
+      {
+        test: (url, method) => method === 'GET' && /\/surgeries/.test(url),
+        respond: () => Promise.resolve({ ok: true, json: async () => ({ success: true, data: [] }) }),
+      },
+    ]);
+
+    render(<><SalonYonetim /><Toast /></>);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Salonlar alınamadı/i)).toBeInTheDocument();
+    });
+    // Sayfa çökmedi — üst "Salon Ekle" butonu hâlâ DOM'da.
     expect(screen.getByRole('button', { name: /salon ekle/i })).toBeInTheDocument();
   });
 });
