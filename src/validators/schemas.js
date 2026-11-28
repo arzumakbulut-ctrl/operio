@@ -161,6 +161,19 @@ const supportTicketCommentSchema = z.object({
   message: z.string().min(1, 'Yorum metni gerekli').max(2000),
 });
 
+// ── PLATFORM AYARLARI (tek satır, id=1) ─────────────────────
+// Tüm alanlar opsiyonel (PATCH kısmi güncelleme). Alan adları camelCase; servis
+// katmanı bunları platform_settings kolonlarına (snake_case) çevirir.
+const platformSettingsUpdateSchema = z.object({
+  platformName:    z.string().min(1).max(100),
+  supportEmail:    z.string().email().max(200).nullable(),
+  billingEmail:    z.string().email().max(200).nullable(),
+  trialDays:       z.number().int().positive().max(365),
+  autoBilling:     z.boolean(),
+  maintenanceMode: z.boolean(),
+  backupFrequency: z.string().min(1).max(20),
+}).partial();
+
 // ── BİLDİRİM ────────────────────────────────────────────────
 const notificationCreateSchema = z.object({
   targetRole:   z.number().int().min(0).max(10).optional().nullable(),
@@ -286,6 +299,7 @@ module.exports = {
   supportTicketCreateSchema,
   supportTicketUpdateSchema,
   supportTicketCommentSchema,
+  platformSettingsUpdateSchema,
   notificationCreateSchema,
   paginationSchema,
   deviceCreateSchema,
