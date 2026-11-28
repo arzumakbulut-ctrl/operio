@@ -70,7 +70,11 @@ async function createInstitution({ data, actorId, req }) {
        RETURNING *`,
       [
         data.name,
-        data.type ?? null,
+        // type kolonunun DEFAULT 'Devlet Hastanesi' değeri var (migrations/001_init.sql) —
+        // bu INSERT type'ı kolon listesinde EXPLICIT geçtiği için, boş bırakılırsa NULL
+        // DEĞİL, tablonun kendi varsayılanı uygulanacak şekilde burada da aynı değer
+        // tekrarlanıyor (açık NULL geçmek DB varsayılanını ezerdi).
+        data.type ?? 'Devlet Hastanesi',
         data.address ?? null,
         data.phone ?? null,
         normalizedEmail,
