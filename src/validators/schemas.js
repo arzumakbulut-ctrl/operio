@@ -137,6 +137,30 @@ const institutionGroupCreateSchema = z.object({
   name: z.string().min(2, 'Grup adı en az 2 karakter olmalı').max(200),
 });
 
+// ── KURUM TALEBİ (Destek/Faturalama/Satış Biletleri) ─────────
+// createSchema bu task'ın router'ında KULLANILMAZ — tasarım dokümanının kendi
+// kararı (hastane tarafının "destek talebi aç" akışı bu konsolun kapsamı
+// DIŞINDA, talepler şimdilik seed/manuel veriyle var olur, bkz.
+// docs/superpowers/specs/2026-11-28-platform-admin-konsolu-design.md). Brief'in
+// dosya listesi bu şemayı açıkça adlandırdığı için (gelecekteki bir hastane-tarafı
+// "talep aç" endpoint'i için), burada şekliyle birlikte tanımlanıyor.
+const supportTicketCreateSchema = z.object({
+  institutionId: z.string().uuid(),
+  type:          z.enum(['TECHNICAL', 'FEATURE_REQUEST', 'BILLING', 'SALES']),
+  priority:      z.enum(['LOW', 'MEDIUM', 'HIGH']).default('MEDIUM'),
+  subject:       z.string().min(3).max(200),
+  description:   z.string().max(2000).optional().nullable(),
+});
+
+// PATCH /:id/status — supportTicket.service.js'in updateStatus'u SADECE status alır.
+const supportTicketUpdateSchema = z.object({
+  status: z.enum(['OPEN', 'IN_PROGRESS', 'CLOSED']),
+});
+
+const supportTicketCommentSchema = z.object({
+  message: z.string().min(1, 'Yorum metni gerekli').max(2000),
+});
+
 // ── BİLDİRİM ────────────────────────────────────────────────
 const notificationCreateSchema = z.object({
   targetRole:   z.number().int().min(0).max(10).optional().nullable(),
@@ -259,6 +283,9 @@ module.exports = {
   institutionUpdateSchema,
   institutionStatusSchema,
   institutionGroupCreateSchema,
+  supportTicketCreateSchema,
+  supportTicketUpdateSchema,
+  supportTicketCommentSchema,
   notificationCreateSchema,
   paginationSchema,
   deviceCreateSchema,
