@@ -1,9 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useDataStore, useUIStore, useAuthStore } from '../store';
 import Modal from '../components/ui/Modal';
-
-const BASE = 'http://localhost:4000/api';
-function tok() { return localStorage.getItem('operio_access'); }
+import { listSterileSets, createSterileSet, updateSterileSet } from '../services/sterileSetsAdapter.js';
 
 // ── İKONLAR (HTML ICONS'tan) ─────────────────────────────────
 const IC_SET   = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{width:12,height:12}}><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>;
@@ -22,18 +20,6 @@ const DURUM_SET_CFG = {
 
 const COLORS = ['#14B8A6','#0284C7','#7C3AED','#DC2626','#059669','#EA580C'];
 
-function dbToUi(r, i) {
-  return {
-    id: r.id,
-    name: r.name,
-    doktor: r.code || 'Genel Kullanım',
-    raf: r.location || '—',
-    durum: r.status || 'Steril — Hazır',
-    color: COLORS[i % COLORS.length],
-    aletler: [],
-  };
-}
-
 export default function SterilSetler() {
   const { surgeries } = useDataStore();
   const { showToast } = useUIStore();
@@ -46,14 +32,12 @@ export default function SterilSetler() {
   const [excelDrag, setExcelDrag] = useState(false);
   const fileInputRef = useRef(null);
   useEffect(() => {
-    fetch(`${BASE}/steril`, { headers: { Authorization: `Bearer ${tok()}` } })
-      .then(r => r.ok ? r.json() : [])
+    listSterileSets()
       .then(data => {
-        const mapped = data.map(dbToUi);
+        const mapped = data.map((s, i) => ({ ...s, color: COLORS[i % COLORS.length] }));
         setSetler(mapped);
         if (mapped.length) setSelId(mapped[0].id);
       })
-      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
@@ -127,22 +111,27 @@ export default function SterilSetler() {
     const aletler = form.aletler
       .filter(a => a.ad.trim())
       .map(a => ({ ad:a.ad.trim(), adet:Number(a.adet)||1, raf }));
-    const body = { name, code: doktor, location: raf, status: form.durum };
+    const payload = {
+      name,
+      code: doktor,
+      shelf_location: raf,
+      status: form.durum,
+      instruments: aletler.map(a => ({ name:a.ad, expected_count:a.adet })),
+    };
 
     try {
-      const url = editId ? `${BASE}/steril/${editId}` : `${BASE}/steril`;
-      const method = editId ? 'PUT' : 'POST';
-      const res = await fetch(url, { method, headers: { 'Content-Type':'application/json', Authorization:`Bearer ${tok()}` }, body: JSON.stringify(body) });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Hata');
       if (editId) {
+        const result = await updateSterileSet(editId, payload);
+        if (!result) throw new Error('Hata');
         setSetler(prev => prev.map(x => x.id===editId ? { ...x, name, doktor, raf, durum:form.durum, aletler } : x));
         setSelId(editId);
         showToast('Set güncellendi ✓');
       } else {
-        const newSet = { id:data.id, name, doktor, raf, durum:form.durum, color:COLORS[setler.length%6], aletler };
+        const result = await createSterileSet(payload);
+        if (!result) throw new Error('Hata');
+        const newSet = { id:result.id, name, doktor, raf, durum:form.durum, color:COLORS[setler.length%6], aletler };
         setSetler(prev => [...prev, newSet]);
-        setSelId(data.id);
+        setSelId(result.id);
         showToast('Set oluşturuldu ✓');
       }
       setModalOpen(false);
@@ -154,26 +143,10 @@ export default function SterilSetler() {
   async function updateDurum(id, durum) {
     setSetler(prev => prev.map(x => x.id===id ? {...x, durum} : x));
     try {
-      await fetch(`${BASE}/steril/${id}`, { method:'PUT', headers: { 'Content-Type':'application/json', Authorization:`Bearer ${tok()}` }, body: JSON.stringify({ status: durum }) });
+      await updateSterileSet(id, { status: durum });
       showToast('Set durumu güncellendi: ' + durum);
     } catch(e) {
       showToast('Güncelleme hatası: ' + e.message);
-    }
-  }
-
-  async function deleteSet(id) {
-    const s = setler.find(x => x.id === id);
-    if (s && s.durum === 'Kullanımda') { showToast('Kullanımdaki set silinemez'); return; }
-    if (!window.confirm('Bu seti silmek istiyor musunuz?')) return;
-    try {
-      const res = await fetch(`${BASE}/steril/${id}`, { method:'DELETE', headers: { Authorization:`Bearer ${tok()}` } });
-      if (!res.ok) throw new Error('Silme başarısız');
-      const kalan = setler.filter(x => x.id !== id);
-      setSetler(kalan);
-      if (selId === id && kalan.length) setSelId(kalan[0].id);
-      showToast('Set silindi');
-    } catch(e) {
-      showToast('Silme hatası: ' + e.message);
     }
   }
 
@@ -261,7 +234,6 @@ export default function SterilSetler() {
                   </div>
                   <div style={{display:'flex',gap:7,flexShrink:0}}>
                     <button className="btn btn-secondary btn-sm" onClick={()=>openModal(s.id)}>Düzenle</button>
-                    <button className="btn btn-sm" style={{background:'#FEF2F2',color:'#DC2626',border:'1px solid #FECACA'}} onClick={()=>deleteSet(s.id)}>Sil</button>
                   </div>
                 </div>
 

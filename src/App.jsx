@@ -4,6 +4,7 @@ import { useSocket } from './hooks/useSocket';
 import { useAuthStore, useDataStore } from './store';
 import { listSurgeries } from './services/surgeriesAdapter.js';
 import { listPatients } from './services/patientsAdapter.js';
+import { listSterileSets } from './services/sterileSetsAdapter.js';
 import AuthScreen from './components/auth/AuthScreen';
 import AppLayout from './components/layout/AppLayout';
 import Kiosk from './pages/Kiosk';
@@ -90,7 +91,6 @@ import WebsiteYonetimi   from './pages/WebsiteYonetimi';
 
 function mapPersonel(p){return{id:p.id,ad:p.name||"",rol:p.specialty||"",specialty:p.specialty||"",r:p.specialty||"",av:(p.name||"").split(" ").map(function(w){return w[0]||"";}).join("").slice(0,2).toUpperCase(),bg:"#0284C7",durum:p.status||"Aktif",s:p.status||"Aktif",gun:0,tel:p.phone||"",email:p.email||"",sicil:"",uzmanlik:p.specialty||"",roleId:p.roleId||""};}
 function mapRoom(r){var m=r.name.match(/\d+/);return{id:r.id,ad:r.name,_sortNum:m?parseInt(m[0]):999,durum:r.status||"Bos",active:false,brans:"",op:"",ekip:[],time:"",kapasite:r.capacity||4,cihazlar:[]};}
-function mapSteril(s){return{id:s.id,ad:s.name,kod:s.code||"",adet:1,raf:s.location||"",durum:s.status||"Steril",sonSteril:s.lastSteril?new Date(s.lastSteril).toLocaleDateString("tr-TR"):"",kullanim:0};}
 function useApiLoader(){
   const isLoggedIn=useAuthStore(function(s){return s.isLoggedIn;});
   const store=useDataStore();
@@ -100,13 +100,13 @@ function useApiLoader(){
     if(!token)return;
     var h={"Content-Type":"application/json","Authorization":"Bearer "+token};
     function get(path){return fetch("http://localhost:4000/api"+path,{headers:h}).then(function(r){return r.ok?r.json():null;}).catch(function(){return null;});}
-    Promise.all([listSurgeries(),listPatients(),get("/personel"),get("/rooms"),get("/steril"),get("/kurumlar"),get("/kurumlar/gruplar"),get("/cihazlar"),get("/cihazlar/bakim"),get("/cihazlar/ariza"),get("/finans/faturalar"),get("/finans/gelir-gider"),get("/notifications")]).then(function(results){
+    Promise.all([listSurgeries(),listPatients(),get("/personel"),get("/rooms"),listSterileSets(),get("/kurumlar"),get("/kurumlar/gruplar"),get("/cihazlar"),get("/cihazlar/bakim"),get("/cihazlar/ariza"),get("/finans/faturalar"),get("/finans/gelir-gider"),get("/notifications")]).then(function(results){
       var a=results[0],h2=results[1],p=results[2],r=results[3],s=results[4],k=results[5],g=results[6],cih=results[7],bak=results[8],arz=results[9],fat=results[10],gg=results[11],notifs=results[12];
       if(a&&a.length)store.loadSurgeries(a);
       if(h2&&h2.length)store.loadHastalar(h2);
       if(p&&p.length)store.loadPersonel(p.map(mapPersonel));
       if(r&&r.length)store.loadRooms(r.map(mapRoom).sort(function(a,b){return a._sortNum-b._sortNum;}));
-      if(s&&s.length)store.loadSteril(s.map(mapSteril));
+      if(s&&s.length)store.loadSteril(s);
       if(k&&k.length)store.loadKurumlar(k.map(function(x){return{id:x.id,ad:x.name||"",tur:x.type||"",sehir:"",ilce:"",yatak:0,salonSayisi:0,kullaniciSayisi:0,durum:x.status||"Aktif",paket:"standard",abonelikBaslangic:"",abonelikBitis:"",aylikUcret:0,iletisimAd:"",iletisimTel:x.phone||"",iletisimEmail:x.email||"",grupId:x.groupId||""};}));
       if(g&&g.length)store.loadKurumGruplari(g.map(function(x){return{id:x.id,ad:x.name||"",tip:"",kurumIdler:(x.kurumlar||[]).map(function(k){return k.id;}),yetkiliAd:"",yetkiliEmail:"",toplamGelir:0,durum:"Aktif"};}));
       if(cih&&cih.length)store.loadCihazlar(cih.map(function(c){return{id:c.id,ad:c.name||"",kat:c.brand||"",sn:c.code||"",lok:c.location||"",durum:c.status||"Aktif",sonBakim:c.lastMaintDate?new Date(c.lastMaintDate).toLocaleDateString("tr-TR"):"",sonucBakim:c.nextMaintDate?new Date(c.nextMaintDate).toLocaleDateString("tr-TR"):"",kalibrasyon:"",garantiBitis:""};}));
