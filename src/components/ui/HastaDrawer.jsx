@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useDataStore } from '../../store';
+import { getPatient } from '../../services/patientsAdapter.js';
 
 export default function HastaDrawer({ hasta, onClose }) {
-  const token = localStorage.getItem('operio_access');
   const { surgeries } = useDataStore();
   const [dbHasta, setDbHasta] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -11,9 +11,7 @@ export default function HastaDrawer({ hasta, onClose }) {
 
   useEffect(() => {
     if (!hasta?.id) { setLoading(false); return; }
-    fetch('http://localhost:4000/api/hastalar/' + hasta.id, {
-      headers: { 'Authorization': 'Bearer ' + token }
-    }).then(r => r.ok ? r.json() : null)
+    getPatient(hasta.id)
       .then(data => { if(data) setDbHasta(data); setLoading(false); })
       .catch(() => setLoading(false));
   }, [hasta?.id]);
@@ -83,7 +81,11 @@ export default function HastaDrawer({ hasta, onClose }) {
                   <span style={{fontWeight:600,color:'var(--slate)'}}>{value}</span>
                 </div>
               ) : null)}
-              {(h.alerjiler || h.allergies) && (
+              {/* patientsAdapter.getPatient 'alerjiler' alanı için backend'de
+                  karşılığı olmadığından sabit 'Yok' döner (bkz. patientsAdapter.js
+                  mapPatient yorumu) — bu placeholder'ı gerçek bir alerji uyarısı
+                  gibi kırmızı kutuda göstermemek için hariç tutuyoruz. */}
+              {((h.alerjiler && h.alerjiler !== 'Yok') || h.allergies) && (
                 <div style={{marginTop:12,padding:'12px 14px',background:'rgba(220,38,38,0.06)',border:'1px solid rgba(220,38,38,0.2)',borderRadius:10}}>
                   <div style={{fontSize:11,fontWeight:700,color:'#DC2626',marginBottom:4}}>⚠ ALERJİLER</div>
                   <div style={{fontSize:13,color:'var(--slate)'}}>{h.alerjiler || h.allergies}</div>

@@ -6,6 +6,7 @@ import HastaDrawer from '../components/ui/HastaDrawer';
 import { useNavigate } from 'react-router-dom';
 import { ROLES } from '../data/roles';
 import { createSurgery } from '../services/surgeriesAdapter';
+import { listPatients, createPatient } from '../services/patientsAdapter';
 
 // Orijinal HTML'deki AVCOLORS ve sabitler
 const ST_RENK  = { 'dot-active':'#059669', 'dot-wait':'#D97706', 'dot-done':'#94A3B8', 'dot-prep':'#0284C7' };
@@ -243,20 +244,18 @@ export default function Ameliyatlar() {
     try {
       const token = localStorage.getItem('operio_access');
       // Once hasta bul veya olustur
-      const hastalarRes = await fetch('http://localhost:4000/api/hastalar', {
-        headers: { 'Authorization': 'Bearer ' + token }
-      });
-      const hastalarData = await hastalarRes.json();
-      let hasta = hastalarData.find(h => (h.name + ' ' + (h.surname||'')).trim().toLowerCase() === ekleForm.hastaAd.toLowerCase());
-      
+      const hastalarData = await listPatients();
+      let hasta = hastalarData.find(h => (h.ad + ' ' + (h.soyad||'')).trim().toLowerCase() === ekleForm.hastaAd.toLowerCase());
+
       if (!hasta) {
-        const adParts = ekleForm.hastaAd.split(' ');
-        const hRes = await fetch('http://localhost:4000/api/hastalar', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-          body: JSON.stringify({ name: adParts[0]||ekleForm.hastaAd, surname: adParts.slice(1).join(' ')||'' }),
-        });
-        hasta = await hRes.json();
+        const adParts = ekleForm.hastaAd.trim().split(/\s+/);
+        const ilkAd = adParts[0] || ekleForm.hastaAd;
+        // Backend lastName icin min 2 karakter zorunlu tutuyor (schemas.js:
+        // patientCreateSchema) - soyad girilmemisse adi tekrar kullaniyoruz,
+        // bos string gondermek 400 ile reddedilirdi.
+        const soyAd = adParts.slice(1).join(' ') || ilkAd;
+        hasta = await createPatient({ firstName: ilkAd, lastName: soyAd });
+        if (!hasta) throw new Error('Hasta olusturulamadi');
       }
 
       // Personel bul (doktor)
