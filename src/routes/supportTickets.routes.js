@@ -29,10 +29,16 @@ function mapError(res, err) {
 // genişletildiği AYNI tercih burada da kullanılıyor.
 router.use(authenticatePlatformAdmin);
 
+// status/type/institutionId BİLEREK gerçek DB enum'larına/UUID biçimine karşı
+// doğrulanır (Minor Finding B): bare z.string() bir geçersiz değeri (ör.
+// ?status=bogus) doğrudan SQL'e geçirirdi — Postgres bunu ham bir 22P02 (invalid
+// enum input) ile reddeder, bu da yakalanmamış bir 500 olarak dışa sızar (temiz
+// bir 400 DEĞİL). Enum değerleri migrations/002_platform_admin.sql'deki
+// ticket_status/ticket_type ile AYNI.
 router.get('/', authorizePlatformAdmin('super', 'destek'), validateQuery(paginationSchema.extend({
-  status:        z.string().optional(),
-  type:          z.string().optional(),
-  institutionId: z.string().optional(),
+  status:        z.enum(['OPEN', 'IN_PROGRESS', 'CLOSED']).optional(),
+  type:          z.enum(['TECHNICAL', 'FEATURE_REQUEST', 'BILLING', 'SALES']).optional(),
+  institutionId: z.string().uuid().optional(),
 })), async (req, res) => {
   try {
     const result = await getService().listTickets({

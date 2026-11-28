@@ -116,7 +116,11 @@ const institutionCreateSchema = z.object({
   bedCount:    z.number().int().positive().optional().nullable(),
   city:        z.string().max(100).optional().nullable(),
   district:    z.string().max(100).optional().nullable(),
-  contactName: z.string().min(2, 'Yetkili adı en az 2 karakter olmalı').max(200),
+  // max(100), 200 DEĞİL: bootstrap transaction'ı bu değeri users.full_name'e yazar
+  // (institution.service.js'in createInstitution'ı) ve o kolon VARCHAR(100)'dür
+  // (migrations/001_init.sql) — 200'e kadar izin vermek, transaction İÇİNDE bir
+  // Postgres 22001 (value too long) hatasına (temiz bir 400 DEĞİL) yol açardı.
+  contactName: z.string().min(2, 'Yetkili adı en az 2 karakter olmalı').max(100),
 });
 
 const institutionUpdateSchema = institutionCreateSchema.partial().extend({
