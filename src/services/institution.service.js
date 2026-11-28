@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const db     = require('../utils/db');
 const { hashPassword } = require('../utils/password');
 const { auditPlatformAdmin } = require('../utils/platformAdminAudit');
-const { startTrial, getSubscription } = require('./subscription.service');
+const { startTrial, getSubscription, getPlan } = require('./subscription.service');
 
 async function listInstitutions({ page = 1, limit = 20 } = {}) {
   const offset = (page - 1) * limit;
@@ -51,6 +51,15 @@ async function getInstitution({ id }) {
  * adımdır (subscription.service.js'i bir transaction client'ı kabul edecek şekilde
  * yeniden yazmak bu görevin kapsamı DIŞINDA — "gerçek fonksiyon, don't reimplement its
  * logic").
+ *
+ * DENETİM KAYDI SIRASI (Review Focus — Finding 1): institution+user'ı yaratan
+ * `auditPlatformAdmin` çağrısı, transaction commit olduktan hemen SONRA ve
+ * startTrial'dan ÖNCE çalışır — çünkü o kısım zaten kalıcı olarak yazılmıştır,
+ * startTrial'ın sonucu NE OLURSA OLSUN bu kaydın var olması gerekir. startTrial
+ * başarısız olursa hata FIRLATILMAZ: fonksiyon normal şekilde döner,
+ * `trialStarted:false` + `trialError` ile işaretler (platform-admin'in bunu bir
+ * başarı/201 olarak görmesi ve kurumun GERÇEKTEN oluştuğunu bilmesi gerekir — bir
+ * boş 500 bunu gizlerdi), VE bu başarısızlık kendi platform-admin denetim kaydını alır.
  */
 async function createInstitution({ data, actorId, req }) {
   const normalizedEmail = data.email.toLowerCase().trim();
@@ -106,8 +115,8 @@ async function createInstitution({ data, actorId, req }) {
     return { institution, user };
   });
 
-  await startTrial({ institutionId: institution.id, planSlug: 'pro', trialDays: 14 });
-
+  // Transaction COMMIT oldu — institution+user artık kalıcı. Bu denetim kaydı
+  // startTrial'dan ÖNCE yazılır (bkz. yukarıdaki fonksiyon yorumu).
   await auditPlatformAdmin({
     adminId:    actorId,
     action:     'CREATE',
@@ -117,9 +126,30 @@ async function createInstitution({ data, actorId, req }) {
     req,
   });
 
+  let trialStarted = true;
+  let trialError;
+  try {
+    await startTrial({ institutionId: institution.id, planSlug: 'pro', trialDays: 14 });
+  } catch (err) {
+    trialStarted = false;
+    trialError = err.message;
+    // Institution+user zaten var, trial YOK — platform-admin'in bunu görmesi/
+    // soruşturabilmesi için ayrı bir denetim kaydı.
+    await auditPlatformAdmin({
+      adminId:    actorId,
+      action:     'TRIAL_START_FAILED',
+      resource:   'institution',
+      resourceId: institution.id,
+      newData:    { planSlug: 'pro', error: trialError },
+      req,
+    });
+  }
+
   return {
     ...institution,
     firstUser: { ...user, temporaryPassword },
+    trialStarted,
+    ...(trialStarted ? {} : { trialError }),
   };
 }
 
@@ -139,6 +169,13 @@ const INSTITUTION_FIELD_MAP = {
  * bkz. migrations/001_init.sql) — surgery.service.js'in updateSurgery'sindeki gibi
  * `updated_at = NOW()` eklemek "column does not exist" hatası verirdi, BİLEREK
  * eklenmedi.
+ *
+ * `planSlug` DOĞRULAMASI (Review Focus — Finding 2): `subscriptions.plan_slug`'a
+ * yazılmadan ÖNCE gerçek `plans` tablosuna karşı doğrulanır (`getPlan`, aynı
+ * `subscription.service.js`'den). `subscription.service.js`'in `getSubscription`'ı
+ * `plans`'a INNER JOIN attığı için, doğrulanmamış/typo'lu bir slug o aboneliği HER
+ * YERDE (ör. `checkPlanLimit`) görünmez kılar — ve bu PATCH hatasız 200 dönerdi.
+ * Bu kontrol HİÇBİR yazmadan (institution alan güncellemeleri dahil) ÖNCE çalışır.
  */
 async function updateInstitution({ id, data, actorGroupSlug, actorId, req }) {
   const keys = Object.keys(data);
@@ -158,6 +195,14 @@ async function updateInstitution({ id, data, actorGroupSlug, actorId, req }) {
   if (!old) return null;
 
   const { planSlug, ...institutionData } = data;
+
+  if (planSlug !== undefined) {
+    const plan = await getPlan(planSlug);
+    if (!plan) {
+      throw Object.assign(new Error(`Geçersiz plan: ${planSlug}`), { statusCode: 400 });
+    }
+  }
+
   let institutionId = old.id;
 
   const institutionKeys = Object.keys(institutionData).filter((k) => INSTITUTION_FIELD_MAP[k] !== undefined);
@@ -184,6 +229,12 @@ async function updateInstitution({ id, data, actorGroupSlug, actorId, req }) {
         'UPDATE subscriptions SET plan_slug=$1, updated_at=NOW() WHERE id=$2',
         [planSlug, currentSub.id]
       );
+    } else {
+      // startTrial'ın bootstrap sırasında başarısız olup hiçbir abonelik bırakmadığı
+      // durumda (bkz. createInstitution'daki trialStarted:false yolu) bu PATCH'in
+      // sessizce no-op olmaması için: abonelik hiç yoksa, istenen planSlug ile
+      // yeniden başlatılır.
+      await startTrial({ institutionId: id, planSlug, trialDays: 14 });
     }
   }
 

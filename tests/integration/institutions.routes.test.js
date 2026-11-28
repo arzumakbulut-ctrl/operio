@@ -106,6 +106,17 @@ describe('POST /api/platform-admin/institutions', () => {
     expect(callArg.actorId).toBe('admin-super');
   });
 
+  it('startTrial commit sonrası başarısız olsa da kurum GERÇEKTEN oluştuğundan 201 döner (trialStarted:false, bare 500 DEĞİL — Review Focus Finding 1)', async () => {
+    mockService.createInstitution.mockResolvedValueOnce({
+      id: 'inst1', name: 'Test Hastanesi', firstUser: { id: 'user1' },
+      trialStarted: false, trialError: 'insert or update on table "subscriptions" violates foreign key constraint',
+    });
+    const res = await request.post('/api/platform-admin/institutions').set('Authorization', `Bearer ${superToken}`).send(payload);
+    expect(res.status).toBe(201);
+    expect(res.body.data.id).toBe('inst1');
+    expect(res.body.data.trialStarted).toBe(false);
+  });
+
   it('finans grubu POST yapamaz (403)', async () => {
     expect((await request.post('/api/platform-admin/institutions').set('Authorization', `Bearer ${finansToken}`).send(payload)).status).toBe(403);
   });
