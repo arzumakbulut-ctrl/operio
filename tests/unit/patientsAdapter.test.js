@@ -15,7 +15,9 @@ describe('listPatients', () => {
 
     const result = await listPatients();
 
-    expect(global.fetch).toHaveBeenCalledWith(`${BASE}/patients`, expect.objectContaining({
+    // Finding 3: query param yoksa backend limit'i varsayılan 20'ye düşürüyor
+    // — ?limit=100 şemanın izin verdiği maksimum gönderilmeli.
+    expect(global.fetch).toHaveBeenCalledWith(`${BASE}/patients?limit=100`, expect.objectContaining({
       headers: expect.objectContaining({ Authorization: 'Bearer test-token' }),
     }));
     expect(result[0]).toMatchObject({ id:'p1', ad:'Ayşe', soyad:'Demir', tc:'12345678901', kan:'A+', cinsiyet:'K', tel:'5551234567' });

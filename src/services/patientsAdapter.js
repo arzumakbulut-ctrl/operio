@@ -64,7 +64,9 @@ async function apiCall(method, path, body) {
 }
 
 export async function listPatients() {
-  const result = await apiCall('GET', '/patients');
+  // Finding 3: query param yoksa backend paginationSchema limit'i varsayılan
+  // 20'ye düşüyor — ?limit=100 şemanın izin verdiği maksimum.
+  const result = await apiCall('GET', '/patients?limit=100');
   if (!Array.isArray(result?.data)) return [];
   return result.data.map(mapPatient);
 }
