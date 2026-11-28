@@ -14,6 +14,14 @@ function mapError(res, err) {
   switch (err.statusCode) {
     case 400: return badRequest(res, err.message);
     case 403: return forbidden(res, err.message);
+    // case 404: assignInstitution'ın (Review Focus — Finding 4) iki yeni thrown-hata
+    // yolu için — bu konsolun diğer rotalarındaki (updateGroup/deleteGroup dahil, bu
+    // dosyanın KENDİSİ) "yok" durumu normalde throw+mapError'dan DEĞİL, servisin null
+    // dönüp route'un `if (!x) return notFound(...)` yapmasından gelir; assignInstitution
+    // ise (removeInstitution gibi) anlamlı bir dönüş değeri olmayan "fire-and-forget" bir
+    // fonksiyon olduğu için buradaki thrown+mapError yoluyla 404'e bağlanıyor. `notFound`
+    // zaten bu dosyada import edilmiş/kullanılıyor — burada SADECE throw yoluna bağlandı.
+    case 404: return notFound(res, err.message);
     case 409: return conflict(res, err.message);
     default:  return serverError(res, err);
   }

@@ -85,9 +85,45 @@ async function deleteGroup({ id, actorId, req }) {
  * UPDATE onu otomatik olarak yeni gruba taşır — ayrıca bir "önce çıkar" adımına
  * gerek yok (tek grup kuralı burada, servis katmanında, kolonun kendi şekliyle
  * doğal olarak uygulanıyor).
+ *
+ * İKİ HATA DURUMU (Review Focus — Finding 4): önceki sürüm çıplak bir `UPDATE ...
+ * WHERE id=$2` idi, satır sayısı HİÇ kontrol edilmiyordu:
+ *   (a) `institutionId` hiç yoksa UPDATE 0 satır değiştirir ama sorgu kendisi hata
+ *       FIRLATMAZ — eski kod 200 "başarı" dönerdi VE asla gerçekleşmemiş bir ASSIGN
+ *       audit kaydı yazardı. Şimdi `RETURNING id` eklenir; 0 satır → 404.
+ *   (b) `groupId` hiç yoksa `institutions.group_id`'nin FK kısıtlaması (migrations/
+ *       002_platform_admin.sql: `group_id UUID REFERENCES institution_groups(id)`)
+ *       ihlal edilir ve ham bir Postgres 23503 (foreign_key_violation) yakalanmamış
+ *       bir 500 olarak dışarı sızardı. Şimdi bu kod yakalanıp temiz bir 404'e çevrilir.
+ *
+ * 404 vs 409 (removeInstitution'ın KENDİ 409'u İLE KARŞILAŞTIRMA): removeInstitution'ın
+ * 409'u BAŞKA bir anlam taşıyor — kurum VAR ama (groupId, institutionId) kombinasyonu
+ * tutmuyor (kurum var, sadece BU grupta değil) — bu bir "durum çakışması"dır. Buradaki
+ * 0-satır durumu ise `WHERE id=$2`'nin TEK koşulu institutionId olduğu için institutionId
+ * doğrudan HİÇ VAR OLMUYOR demektir — bu, kod tabanının HER YERDE (institutions.routes.js,
+ * platformAdminAccounts.routes.js, device.routes.js, surgery.routes.js, vb. — ~10+ yerde)
+ * "varlık yok" için kullandığı dominant `notFound`/404 kuralıyla AYNI semantik kategori,
+ * removeInstitution'ın dar "yanlış/eski groupId" senaryosuyla DEĞİL. Bu yüzden 404 seçildi;
+ * bu da bu dosyadaki (ve SADECE bu dosyadaki) `mapError`'a yeni bir `case 404` eklemeyi
+ * gerektirdi (institutionGroups.routes.js) — notFound zaten o dosyada import edilmiş ve
+ * kullanılıyor (updateGroup/deleteGroup'ta), sadece throw+mapError yoluna da bağlandı.
  */
 async function assignInstitution({ groupId, institutionId, actorId, req }) {
-  await db.query('UPDATE institutions SET group_id=$1 WHERE id=$2', [groupId, institutionId]);
+  let rows;
+  try {
+    ({ rows } = await db.query(
+      'UPDATE institutions SET group_id=$1 WHERE id=$2 RETURNING id',
+      [groupId, institutionId]
+    ));
+  } catch (err) {
+    if (err.code === '23503') { // foreign_key_violation — groupId institution_groups'ta yok
+      throw Object.assign(new Error('Kurum grubu bulunamadı'), { statusCode: 404 });
+    }
+    throw err;
+  }
+  if (!rows.length) {
+    throw Object.assign(new Error('Kurum bulunamadı'), { statusCode: 404 });
+  }
 
   await auditPlatformAdmin({
     adminId: actorId, action: 'ASSIGN', resource: 'institution_group',

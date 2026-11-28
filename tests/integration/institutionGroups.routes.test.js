@@ -18,9 +18,24 @@ const mockService = {
   removeInstitution:  vi.fn(),
 };
 
+// Review Focus — Finding 5: `authenticatePlatformAdmin` artık HER istekte
+// `registry.get('platformAdminAccount', ...)`'u `getActiveAccountById(sub)` ile
+// çağırıp hesabın GÜNCEL is_active/group_slug'unu DB'den (burada: mock'tan) okur.
+// Bu dosya o servisi test ETMEDİĞİ için (institutionGroup servisini test ediyor),
+// burada SADECE middleware'in ihtiyaç duyduğu bu kontrolü karşılayan minimal bir
+// mock kurulur — aşağıdaki `tok(groupSlug)` yardımcısının `sub: admin-${groupSlug}`
+// deseniyle AYNI id'den groupSlug'ı geri çıkarır, böylece token'daki grup DB'nin
+// "güncel" cevabıyla tutarlı kalır.
+const mockPlatformAdminAccountService = { getActiveAccountById: vi.fn() };
+
 beforeEach(() => {
   vi.clearAllMocks();
   registry.register('institutionGroup', mockService);
+  registry.register('platformAdminAccount', mockPlatformAdminAccountService);
+  mockPlatformAdminAccountService.getActiveAccountById.mockImplementation(async (id) => {
+    const m = /^admin-(super|destek|finans|icerik)$/.exec(id);
+    return m ? { is_active: true, group_slug: m[1] } : null;
+  });
 });
 
 const tok = (groupSlug) => signPlatformAdminAccessToken({
@@ -183,6 +198,24 @@ describe('Kurum Grupları CRUD', () => {
           .set('Authorization', `Bearer ${token}`);
         expect(res.status).toBe(403);
       }
+    });
+
+    it('institutionId yoksa → servis 404 fırlatır, route 404 döner (Review Focus — Finding 4)', async () => {
+      mockService.assignInstitution.mockRejectedValueOnce(
+        Object.assign(new Error('Kurum bulunamadı'), { statusCode: 404 })
+      );
+      const res = await request.post('/api/platform-admin/institution-groups/grp1/institutions/inst-missing')
+        .set('Authorization', `Bearer ${superToken}`);
+      expect(res.status).toBe(404);
+    });
+
+    it('groupId yoksa → servis 404 fırlatır, route 404 döner (Review Focus — Finding 4)', async () => {
+      mockService.assignInstitution.mockRejectedValueOnce(
+        Object.assign(new Error('Kurum grubu bulunamadı'), { statusCode: 404 })
+      );
+      const res = await request.post('/api/platform-admin/institution-groups/grp-missing/institutions/inst1')
+        .set('Authorization', `Bearer ${superToken}`);
+      expect(res.status).toBe(404);
     });
   });
 
