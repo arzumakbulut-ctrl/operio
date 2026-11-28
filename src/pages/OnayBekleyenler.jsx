@@ -1,9 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore, useUIStore } from '../store';
 import { ROLES } from '../data/roles';
-import { listSurgeries } from '../services/surgeriesAdapter.js';
+import { listSurgeries, updateSurgeryStatus } from '../services/surgeriesAdapter.js';
 
-const BASE = 'http://localhost:4000/api';
+// Bu sayfanın kendi talep-triyaj sözlüğü ('Onaylandi'/'Reddedildi') backend'in
+// gerçek ameliyat-durumu enum'u DEĞİL (WAITING|PREPARING|IN_PROGRESS|COMPLETED|
+// CANCELLED|POSTPONED). AmeliyatDetay.jsx:12'deki STATUS_TO_BACKEND tablosuyla
+// tutarlı olacak şekilde: onay = ameliyat resmi olarak sıraya girer → WAITING
+// (tablodaki 'Bekliyor':'WAITING' emsaliyle aynı); red = 'Iptal':'CANCELLED'
+// emsaliyle aynı mantık — talep reddedildiğinde ameliyat iptal edilmiş sayılır.
+const TALEP_DURUM_TO_BACKEND = { Onaylandi: 'WAITING', Reddedildi: 'CANCELLED' };
 
 // NOT: s.hasta/s.dr/s.tarihRaw/s.saat/s.bitis/s.salon/s.op/s.durum/s.hastaDetay
 // surgeriesAdapter.listSurgeries()'in Türkçe-eşlenmiş alan adlarıdır (bkz. Task 2).
@@ -129,8 +135,15 @@ export default function OnayBekleyenler() {
 
     if (!newDurum) return;
 
+    // Rollback için eski durumu sakla (DB çağrısı başarısız olursa geri alınır)
+    const eskiDurum          = t.durum;
+    const eskiTalepler       = talepler;
+    const eskiAktifTab       = aktifTab;
+    const eskiSelId          = selId;
+    const eskiNotAlan        = notAlan;
+    const eskiBekleyenSayisi = bekleyenSayisi;
+
     // Optimistic local update
-    const eskiDurum = t.durum;
     setTalepler(prev => prev.map(x => x.id !== id ? x : {
       ...x, durum: newDurum, not: not || x.not,
       log: [...x.log, logEntry],
@@ -140,20 +153,25 @@ export default function OnayBekleyenler() {
     setNotAlan('');
 
     // Sidebar badge güncelle
-    if ((eskiDurum === 'beklemede' || eskiDurum === 'duzeltme') && newDurum !== 'beklemede' && newDurum !== 'duzeltme') {
+    const badgeDegisti = (eskiDurum === 'beklemede' || eskiDurum === 'duzeltme') && newDurum !== 'beklemede' && newDurum !== 'duzeltme';
+    if (badgeDegisti) {
       setBekleyenSayisi(Math.max(0, bekleyenSayisi - 1));
     }
 
-    // DB güncelle (sadece onay ve red için)
+    // DB güncelle (sadece onay ve red için — 'duzelt' local-only triyaj durumu,
+    // ameliyat durumu değil, bu yüzden DB çağrısı yapılmaz)
     if (dbStatus) {
-      const token = localStorage.getItem('operio_access');
-      try {
-        await fetch(`${BASE}/ameliyatlar/${id}`, {
-          method: 'PUT',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: dbStatus }),
-        });
-      } catch (_) {}
+      const sonuc = await updateSurgeryStatus(id, TALEP_DURUM_TO_BACKEND[dbStatus]);
+      if (!sonuc) {
+        // DB güncellemesi başarısız oldu — optimistic update'i geri al
+        setTalepler(eskiTalepler);
+        setAktifTab(eskiAktifTab);
+        setSelId(eskiSelId);
+        setNotAlan(eskiNotAlan);
+        if (badgeDegisti) setBekleyenSayisi(eskiBekleyenSayisi);
+        showToast('Hata');
+        return;
+      }
     }
 
     showToast(

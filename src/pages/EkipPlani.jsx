@@ -1,8 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAuthStore, useUIStore, useDataStore } from '../store';
-import { listSurgeries } from '../services/surgeriesAdapter.js';
-
-const BASE = 'http://localhost:4000/api';
+import { listSurgeries, assignTeamMember, removeTeamMember } from '../services/surgeriesAdapter.js';
 const AV_RENKLER = ['#EA580C','#0284C7','#F59E0B','#7C3AED','#059669','#DC2626','#14B8A6'];
 function avRenk(ad) { let h=0; for(let c of (ad||'')) h=(h*31+c.charCodeAt(0))&0xffff; return AV_RENKLER[h%AV_RENKLER.length]; }
 
@@ -136,6 +134,15 @@ export default function EkipPlani() {
     setSecilenEkip(prev => ({ ...prev, [key]: val }));
   }
 
+  // Eski kod `{ekip: yeniEkip}` ile PUT /ameliyatlar/:id çağırıyordu (nonexistent
+  // route). Backend'de ekip ataması ayrı uçlar üzerinden kişi bazlı yapılıyor —
+  // AmeliyatDrawer.jsx:kaydetEkip ile AYNI desen: değişen/çıkarılan her rol için
+  // ayrı removeTeamMember/assignTeamMember çağrısı. personelStore (useDataStore)
+  // şu an GET /api/personel'in gerçek backend karşılığı olmadığı için (App.jsx'teki
+  // get("/personel") her zaman null döner) genelde boş geliyor — bu durumda
+  // eşleşme bulunamaz ve o rol sessizce atlanır. Bu, ayrı ve bu planın kapsamı
+  // dışında bir personel-kablolama sorunu (AmeliyatDrawer.jsx'te de aynı şekilde
+  // kabul edilmiş bir kısıt).
   async function saveEkip() {
     const s = surgeries.find(x => x.id === modalId);
     if (!s) return;
@@ -153,15 +160,15 @@ export default function EkipPlani() {
     setModalOpen(false);
     showToast('Ekip ataması kaydedildi ✓');
 
-    // DB'ye kaydet
-    const token = localStorage.getItem('operio_access');
-    try {
-      await fetch(`${BASE}/ameliyatlar/${modalId}`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ekip: yeniEkip }),
-      });
-    } catch (_) {}
+    for (const [roleKey, ad] of Object.entries(yeniEkip)) {
+      if (!ad || ad === '—') continue;
+      const eskiAd = s.ekip?.[roleKey];
+      if (eskiAd === ad) continue;
+      const eskiPersonel = eskiAd ? personelStore.find(p => p.ad === eskiAd) : null;
+      if (eskiPersonel) await removeTeamMember(modalId, eskiPersonel.id);
+      const yeniPersonel = personelStore.find(p => p.ad === ad);
+      if (yeniPersonel) await assignTeamMember(modalId, yeniPersonel.id, roleKey);
+    }
   }
 
   const modalSurgery = modalId ? surgeries.find(x => x.id === modalId) : null;
