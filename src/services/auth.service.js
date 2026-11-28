@@ -24,12 +24,18 @@ async function login({ email, password, req }) {
     );
   }
 
-  // Kullanıcıyı getir
+  // Kullanıcıyı getir — kurumu SUSPEND edilmiş (institutions.is_active=FALSE) bir
+  // kullanıcı giriş yapamaz. `institution_id` nullable'dır (misafir hekim gibi hiçbir
+  // kuruma bağlı olmayan kullanıcılar bundan ETKİLENMEZ — bkz. migrations/001_init.sql
+  // users.institution_id: FK ama NOT NULL değil), bu yüzden koşul institution_id NULL
+  // olduğunda otomatik olarak geçerli sayılır.
   const { rows } = await db.query(
     `SELECT u.*, r.name AS role_name, r.display_name AS role_display_name
      FROM users u
      JOIN roles r ON u.role_id = r.id
-     WHERE u.email = $1 AND u.is_active = TRUE`,
+     LEFT JOIN institutions i ON u.institution_id = i.id
+     WHERE u.email = $1 AND u.is_active = TRUE
+       AND (u.institution_id IS NULL OR i.is_active = TRUE)`,
     [normalizedEmail]
   );
   const user = rows[0];
@@ -119,8 +125,14 @@ async function refreshTokens({ refreshToken, req }) {
   );
   if (!rows.length) throw Object.assign(new Error('Refresh token geçersiz'), { statusCode: 401 });
 
+  // login()'deki AYNI kurum-pasif kontrolü: zaten elde bir refresh token olsa bile,
+  // kurum bu süre içinde suspend edildiyse yenileme reddedilir.
   const { rows: users } = await db.query(
-    'SELECT * FROM users WHERE id=$1 AND is_active=TRUE', [payload.sub]
+    `SELECT u.* FROM users u
+     LEFT JOIN institutions i ON u.institution_id = i.id
+     WHERE u.id=$1 AND u.is_active=TRUE
+       AND (u.institution_id IS NULL OR i.is_active = TRUE)`,
+    [payload.sub]
   );
   if (!users.length) throw Object.assign(new Error('Kullanıcı bulunamadı'), { statusCode: 401 });
   const user = users[0];

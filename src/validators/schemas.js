@@ -102,12 +102,32 @@ const roomStatusSchema = z.object({
 });
 
 // ── KURUM ────────────────────────────────────────────────────
+// email BİLEREK zorunlu (orijinal şemada optional/nullable idi): platform-admin'in
+// POST /api/platform-admin/institutions ile kurum oluşturduğu akışta bu adres aynı
+// zamanda otomatik oluşturulan ilk kullanıcının (role_id=0) login e-postası olur
+// (bkz. institution.service.js'in createInstitution'ı) — bu route'tan geçen her
+// oluşturma isteği bir bootstrap e-postası gerektirir.
 const institutionCreateSchema = z.object({
-  name:    z.string().min(3).max(200),
-  type:    z.string().max(100).optional(),
-  address: z.string().max(500).optional().nullable(),
-  phone:   z.string().max(20).optional().nullable(),
-  email:   z.string().email().optional().nullable(),
+  name:        z.string().min(3).max(200),
+  type:        z.string().max(100).optional(),
+  address:     z.string().max(500).optional().nullable(),
+  phone:       z.string().max(20).optional().nullable(),
+  email:       z.string().email('Geçerli bir e-posta girin').max(200),
+  bedCount:    z.number().int().positive().optional().nullable(),
+  city:        z.string().max(100).optional().nullable(),
+  district:    z.string().max(100).optional().nullable(),
+  contactName: z.string().min(2, 'Yetkili adı en az 2 karakter olmalı').max(200),
+});
+
+const institutionUpdateSchema = institutionCreateSchema.partial().extend({
+  // planSlug institutions tablosunun bir kolonu DEĞİL — bu kurumun en son aboneliğinin
+  // (subscriptions.plan_slug) değerini günceller. Finans grubu PATCH /:id'de SADECE
+  // bunu gönderebilir (bkz. institution.service.js'in updateInstitution'ı).
+  planSlug: z.string().min(1).max(50).optional(),
+});
+
+const institutionStatusSchema = z.object({
+  isActive: z.boolean(),
 });
 
 // ── BİLDİRİM ────────────────────────────────────────────────
@@ -229,6 +249,8 @@ module.exports = {
   roomCreateSchema,
   roomStatusSchema,
   institutionCreateSchema,
+  institutionUpdateSchema,
+  institutionStatusSchema,
   notificationCreateSchema,
   paginationSchema,
   deviceCreateSchema,
